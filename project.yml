@@ -19,6 +19,8 @@ settings:
 packages:
   ConstellationTerminal:
     path: Packages/ConstellationTerminal
+  ConstellationInfrastructure:
+    path: Packages/ConstellationInfrastructure
 targets:
   Constellation:
     type: application
@@ -27,6 +29,20 @@ targets:
       - path: App
     dependencies:
       - package: ConstellationTerminal
+      - package: ConstellationInfrastructure
+        product: ConstellationOpenSSH
+      - package: ConstellationInfrastructure
+        product: constellation-askpass
+        link: false
+    # ssh runs the helper as a separate process, so it ships beside the app binary.
+    postBuildScripts:
+      - name: Embed constellation-askpass
+        script: |
+          cp -f "${BUILT_PRODUCTS_DIR}/constellation-askpass" "${TARGET_BUILD_DIR}/${EXECUTABLE_FOLDER_PATH}/constellation-askpass"
+        inputFiles:
+          - $(BUILT_PRODUCTS_DIR)/constellation-askpass
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/constellation-askpass
     info:
       path: App/Info.plist
       properties:
@@ -55,3 +71,4 @@ schemes:
       config: Debug
       targets:
         - package: ConstellationTerminal/ConstellationTerminalTests
+        - package: ConstellationInfrastructure/ConstellationOpenSSHTests
