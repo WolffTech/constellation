@@ -13,10 +13,15 @@ settings:
     ARCHS: arm64
     MACOSX_DEPLOYMENT_TARGET: "15.0"
     ENABLE_HARDENED_RUNTIME: YES
-    CODE_SIGN_STYLE: Automatic
-    CODE_SIGN_IDENTITY: "-"
+    # Developer ID keeps the Keychain ACL stable across rebuilds. CI passes
+    # CODE_SIGNING_ALLOWED=NO because runners have no identity.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Developer ID Application"
+    DEVELOPMENT_TEAM: 45QKSLQ5S4
     DEAD_CODE_STRIPPING: YES
 packages:
+  ConstellationCore:
+    path: Packages/ConstellationCore
   ConstellationTerminal:
     path: Packages/ConstellationTerminal
   ConstellationInfrastructure:
@@ -28,7 +33,10 @@ targets:
     sources:
       - path: App
     dependencies:
+      - package: ConstellationCore
       - package: ConstellationTerminal
+      - package: ConstellationInfrastructure
+        product: ConstellationStorage
       - package: ConstellationInfrastructure
         product: ConstellationOpenSSH
       - package: ConstellationInfrastructure
@@ -70,5 +78,7 @@ schemes:
     test:
       config: Debug
       targets:
+        - package: ConstellationCore/ConstellationCoreTests
         - package: ConstellationTerminal/ConstellationTerminalTests
+        - package: ConstellationInfrastructure/ConstellationStorageTests
         - package: ConstellationInfrastructure/ConstellationOpenSSHTests
