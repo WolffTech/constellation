@@ -6,11 +6,18 @@ struct ConstellationApp: App {
 
     var body: some Scene {
         WindowGroup {
-            SessionView(root: root)
+            ContentView(root: root)
         }
-        .defaultSize(width: 960, height: 640)
+        .defaultSize(width: 1100, height: 700)
         .commands {
-            CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .newItem) {
+                Button("New Machine") { root.ui.editor = .new }
+                    .keyboardShortcut("n")
+            }
+            CommandGroup(after: .importExport) {
+                Button("Import Machines…") { Task { await ImportExportPanels.importMachines(into: root.store) } }
+                Button("Export Machines…") { ImportExportPanels.exportMachines(from: root.store) }
+            }
         }
     }
 }

@@ -1,48 +1,70 @@
 import AppKit
+import ConstellationCore
 import ConstellationOpenSSH
+import ConstellationStorage
 import ConstellationTerminal
 import Foundation
 import Observation
 
-/// Builds the app's long-lived objects. Milestone 0 opens a single terminal;
-/// the Session Coordinator replaces this in Milestone 2.
+/// Builds the app's long-lived objects.
 @MainActor
 @Observable
 final class CompositionRoot {
-    private(set) var runtime: GhosttyRuntime?
-    private(set) var askPass: AskPassService?
-    private(set) var session: GhosttyTerminalSession?
+    private(set) var store: MachineStore?
+    private(set) var sessions: SessionHub?
     private(set) var startupError: String?
+    let ui = UIState()
+
+    private var runtime: GhosttyRuntime?
+    private var askPass: AskPassService?
 
     init() {
         do {
+            let vault = KeychainCredentialVault()
+            let library = try GRDBMachineLibrary(path: Self.libraryPath())
+            let store = MachineStore(library: library, vault: vault)
+            self.store = store
+
             let runtime = try GhosttyRuntime(appearance: .default)
             self.runtime = runtime
-            // No vault until Milestone 1: every ssh prompt goes to the user.
-            let askPass = try AskPassService(secrets: InMemorySecretProvider([:])) { request in
+            let askPass = try AskPassService(secrets: VaultSecretProvider(vault: vault)) { request in
                 AskPassPrompter.ask(request)
             }
             self.askPass = askPass
-            session = try runtime.makeSession(command: initialCommand(askPass: askPass))
+            sessions = SessionHub(runtime: runtime, askPass: askPass)
         } catch {
-            startupError = "\(error)"
+            startupError = error.localizedDescription
         }
     }
 
-    /// Development hook for the Milestone 0 SSH proof: `CONSTELLATION_SSH=user@host[:port]`
-    /// opens ssh instead of the local shell. Removed once saved machines exist.
-    private func initialCommand(askPass: AskPassService) -> TerminalCommand {
-        guard let text = ProcessInfo.processInfo.environment["CONSTELLATION_SSH"],
-              let destination = SSHDestination(parsing: text) else {
-            return .localShell()
+    /// `~/Library/Application Support/Constellation/library.sqlite`, or
+    /// `CONSTELLATION_LIBRARY_PATH` for development runs.
+    private static func libraryPath() -> String {
+        if let override = ProcessInfo.processInfo.environment["CONSTELLATION_LIBRARY_PATH"], !override.isEmpty {
+            return override
         }
-        let token = askPass.registerLaunch()
-        guard let helper = Bundle.main.url(forAuxiliaryExecutable: "constellation-askpass")?.path else {
-            return SSHLaunch(destination: destination).command()
-        }
-        let environment = askPass.environment(token: token, credentialID: nil, helperPath: helper)
-        return SSHLaunch(destination: destination).command(environment: environment)
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return support.appendingPathComponent("Constellation/library.sqlite").path
     }
+}
+
+/// Presentation state driven from menu commands and views alike.
+@MainActor
+@Observable
+final class UIState {
+    enum Editor: Identifiable {
+        case new
+        case edit(MachineID)
+        var id: String {
+            switch self {
+            case .new: "new"
+            case .edit(let id): id.description
+            }
+        }
+    }
+
+    var editor: Editor?
+    var selectedMachineID: MachineID?
 }
 
 /// Native dialogs for ssh prompts the vault cannot answer.

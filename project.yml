@@ -68,16 +68,31 @@ targets:
         PRODUCT_NAME: Constellation
         # libghostty's static library pulls in C++ (harfbuzz, freetype).
         OTHER_LDFLAGS: ["-lc++"]
+  ConstellationTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/App
+    dependencies:
+      - target: Constellation
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: tech.wolff.ConstellationTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Constellation.app/Contents/MacOS/Constellation
+        BUNDLE_LOADER: $(TEST_HOST)
 schemes:
   Constellation:
     build:
       targets:
         Constellation: all
+        ConstellationTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
+        - ConstellationTests
         - package: ConstellationCore/ConstellationCoreTests
         - package: ConstellationTerminal/ConstellationTerminalTests
         - package: ConstellationInfrastructure/ConstellationStorageTests

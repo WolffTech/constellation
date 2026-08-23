@@ -32,7 +32,7 @@ public final class AskPassService {
     private var source: CFRunLoopSource?
 
     public init(secrets: any AskPassSecretProvider, userPrompt: @escaping UserPrompt) throws {
-        self.portName = AskPass.portName(pid: getpid())
+        self.portName = AskPass.portName(pid: getpid(), instance: UUID())
         self.secrets = secrets
         self.userPrompt = userPrompt
 

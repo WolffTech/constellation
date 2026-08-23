@@ -13,10 +13,11 @@ struct SSHDestinationTests {
 struct SSHLaunchTests {
     @Test func buildsSeparateArgumentsWithHostKeyAlias() {
         var launch = SSHLaunch(destination: SSHDestination(host: "192.0.2.18", user: "temp", port: 22), hostKeyAlias: "alpha")
+        launch.identityFile = "/Users/example/.ssh/id_ed25519"
         launch.options = ["BatchMode=yes"]
         let command = launch.command(environment: ["SSH_ASKPASS_REQUIRE": "force"])
         #expect(command.executable == "/usr/bin/ssh")
-        #expect(command.arguments == ["-o", "ConnectTimeout=10", "-o", "HostKeyAlias=alpha", "-o", "BatchMode=yes", "-p", "22", "temp@192.0.2.18"])
+        #expect(command.arguments == ["-o", "ConnectTimeout=10", "-o", "HostKeyAlias=alpha", "-i", "/Users/example/.ssh/id_ed25519", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-p", "22", "temp@192.0.2.18"])
         #expect(command.environment["SSH_ASKPASS_REQUIRE"] == "force")
     }
 }

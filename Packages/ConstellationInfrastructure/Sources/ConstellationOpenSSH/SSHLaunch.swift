@@ -41,6 +41,8 @@ public struct SSHLaunch: Sendable {
     /// Shared `known_hosts` entry for every address of one machine.
     public var hostKeyAlias: String?
     public var connectTimeout: Int = 10
+    /// Private key to use exclusively (`-i` plus `IdentitiesOnly=yes`).
+    public var identityFile: String?
     /// Extra `-o` options, for tests and future profile settings.
     public var options: [String] = []
 
@@ -52,6 +54,7 @@ public struct SSHLaunch: Sendable {
     public func command(environment: [String: String] = [:]) -> TerminalCommand {
         var arguments = ["-o", "ConnectTimeout=\(connectTimeout)"]
         if let hostKeyAlias { arguments += ["-o", "HostKeyAlias=\(hostKeyAlias)"] }
+        if let identityFile { arguments += ["-i", identityFile, "-o", "IdentitiesOnly=yes"] }
         for option in options { arguments += ["-o", option] }
         if let port = destination.port { arguments += ["-p", String(port)] }
         arguments.append(destination.argument)

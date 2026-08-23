@@ -54,9 +54,10 @@ public enum AskPass {
         public static let credentialID = "CONSTELLATION_CREDENTIAL_ID"
     }
 
-    /// Message port name for the app instance with `pid`.
-    public static func portName(pid: pid_t) -> String {
-        "tech.wolff.Constellation.askpass.\(pid)"
+    /// Message port name for one service instance. Unique per instance, not
+    /// just per process, so a test host running beside the app gets its own.
+    public static func portName(pid: pid_t, instance: UUID) -> String {
+        "tech.wolff.Constellation.askpass.\(pid).\(instance.uuidString)"
     }
 
     /// Classifies a prompt. OpenSSH sets `SSH_ASKPASS_PROMPT` only for agent
