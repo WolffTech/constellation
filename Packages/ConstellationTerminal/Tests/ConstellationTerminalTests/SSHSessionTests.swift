@@ -61,6 +61,7 @@ struct SSHSessionTests {
         }
         #expect(connected, "screen was: \(session.screenText()) state=\(session.processState)")
         #expect(session.processState == .running)
+        print("ssh proof screen:\n\(session.screenText())")
 
         let pid = try #require(session.foregroundProcessID())
         session.close()
