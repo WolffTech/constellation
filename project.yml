@@ -1,0 +1,57 @@
+# XcodeGen spec. Regenerate the project after editing: `xcodegen generate`.
+name: Constellation
+options:
+  bundleIdPrefix: tech.wolff
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ARCHS: arm64
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    DEAD_CODE_STRIPPING: YES
+packages:
+  ConstellationTerminal:
+    path: Packages/ConstellationTerminal
+targets:
+  Constellation:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    dependencies:
+      - package: ConstellationTerminal
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleName: Constellation
+        CFBundleDisplayName: Constellation
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        NSPrincipalClass: NSApplication
+        NSHighResolutionCapable: true
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSHumanReadableCopyright: "© 2026 Wolff.Tech"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: tech.wolff.Constellation
+        PRODUCT_NAME: Constellation
+        # libghostty's static library pulls in C++ (harfbuzz, freetype).
+        OTHER_LDFLAGS: ["-lc++"]
+schemes:
+  Constellation:
+    build:
+      targets:
+        Constellation: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - package: ConstellationTerminal/ConstellationTerminalTests
