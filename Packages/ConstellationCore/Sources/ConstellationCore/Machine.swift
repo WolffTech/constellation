@@ -30,6 +30,7 @@ public struct Machine: Identifiable, Hashable, Sendable, Codable {
 public struct MachineAddress: Identifiable, Hashable, Sendable, Codable {
     public let id: AddressID
     public let machineID: MachineID
+    /// Optional; the UI shows the network kind when this is empty.
     public var label: String
     public var host: String
     public var kind: AddressKind
@@ -49,6 +50,14 @@ public struct MachineAddress: Identifiable, Hashable, Sendable, Codable {
         self.host = host
         self.kind = kind
         self.priority = priority
+    }
+}
+
+public extension MachineAddress {
+    /// The label, falling back to the network kind so an address is never nameless.
+    var displayLabel: String {
+        let trimmed = label.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? kind.displayName : trimmed
     }
 }
 

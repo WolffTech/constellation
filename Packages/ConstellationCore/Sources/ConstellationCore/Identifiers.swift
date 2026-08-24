@@ -30,8 +30,10 @@ public enum MachineIDTag: Sendable {}
 public enum AddressIDTag: Sendable {}
 public enum ProfileIDTag: Sendable {}
 public enum CredentialIDTag: Sendable {}
+public enum SessionIDTag: Sendable {}
 
 public typealias MachineID = TypedID<MachineIDTag>
 public typealias AddressID = TypedID<AddressIDTag>
 public typealias ProfileID = TypedID<ProfileIDTag>
 public typealias CredentialID = TypedID<CredentialIDTag>
+public typealias SessionID = TypedID<SessionIDTag>

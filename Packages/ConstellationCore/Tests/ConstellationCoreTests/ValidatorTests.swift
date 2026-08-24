@@ -16,6 +16,13 @@ struct ValidatorTests {
         #expect(throws: ValidationError.invalidHost("user@host")) { try Validator.validateHost("user@host") }
     }
 
+    @Test func addressLabelsAreOptionalAndFallBackToTheKind() throws {
+        let address = MachineAddress(machineID: MachineID(), label: "  ", host: "10.0.0.5", kind: .tailscale)
+        try Validator.validate(address)
+        #expect(address.displayLabel == "Tailscale")
+        #expect(MachineAddress(machineID: MachineID(), label: "Office", host: "x").displayLabel == "Office")
+    }
+
     @Test func portsMustBeInRange() {
         #expect(throws: ValidationError.invalidPort(0)) { try Validator.validatePort(0) }
         #expect(throws: ValidationError.invalidPort(70000)) { try Validator.validatePort(70000) }

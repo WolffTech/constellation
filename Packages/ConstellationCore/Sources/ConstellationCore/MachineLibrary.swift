@@ -7,17 +7,20 @@ public struct MachineLibrarySnapshot: Hashable, Sendable {
     public var addresses: [MachineAddress]
     public var profiles: [ConnectionProfile]
     public var credentials: [CredentialReference]
+    public var workspaceTabs: [WorkspaceTab]
 
     public init(
         machines: [Machine] = [],
         addresses: [MachineAddress] = [],
         profiles: [ConnectionProfile] = [],
-        credentials: [CredentialReference] = []
+        credentials: [CredentialReference] = [],
+        workspaceTabs: [WorkspaceTab] = []
     ) {
         self.machines = machines
         self.addresses = addresses
         self.profiles = profiles
         self.credentials = credentials
+        self.workspaceTabs = workspaceTabs.sorted { $0.position < $1.position }
     }
 
     public static let empty = MachineLibrarySnapshot()
@@ -60,6 +63,8 @@ public indirect enum MachineLibraryChange: Hashable, Sendable {
     case deleteProfile(ProfileID)
     case upsertCredential(CredentialReference)
     case deleteCredential(CredentialID)
+    /// Replaces the complete saved-tab snapshot. Quick Connect tabs are excluded.
+    case replaceWorkspace([WorkspaceTab])
     case batch([MachineLibraryChange])
 }
 

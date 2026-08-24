@@ -2,7 +2,6 @@ import Foundation
 
 public enum ValidationError: Error, Hashable, Sendable, LocalizedError {
     case emptyMachineName
-    case emptyAddressLabel
     case emptyHost
     case invalidHost(String)
     case invalidPort(Int)
@@ -13,7 +12,6 @@ public enum ValidationError: Error, Hashable, Sendable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .emptyMachineName: "Give the machine a name."
-        case .emptyAddressLabel: "Give the address a label, such as LAN or Tailscale."
         case .emptyHost: "Enter a hostname or IP address."
         case .invalidHost(let host): "“\(host)” is not a valid hostname or IP address."
         case .invalidPort(let port): "Port \(port) is out of range. Use 1 through 65535."
@@ -30,7 +28,6 @@ public enum Validator {
     }
 
     public static func validate(_ address: MachineAddress) throws(ValidationError) {
-        if address.label.trimmingCharacters(in: .whitespaces).isEmpty { throw .emptyAddressLabel }
         try validateHost(address.host)
     }
 
@@ -81,7 +78,7 @@ public enum Validator {
             if credential.label.trimmingCharacters(in: .whitespaces).isEmpty { throw .emptyProfileName }
         case .batch(let changes):
             for change in changes { try validate(change) }
-        case .deleteMachine, .deleteAddress, .deleteProfile, .deleteCredential:
+        case .deleteMachine, .deleteAddress, .deleteProfile, .deleteCredential, .replaceWorkspace:
             break
         }
     }
