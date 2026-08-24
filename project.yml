@@ -122,3 +122,4 @@ schemes:
         - package: ConstellationInfrastructure/ConstellationStorageTests
         - package: ConstellationInfrastructure/ConstellationOpenSSHTests
         - package: ConstellationRemoteDesktop/ConstellationVNCTests
+        - package: ConstellationRemoteDesktop/ConstellationRDPTests
