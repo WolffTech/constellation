@@ -46,7 +46,11 @@ let package = Package(
         ),
         .testTarget(
             name: "ConstellationOpenSSHTests",
-            dependencies: ["ConstellationOpenSSH", "constellation-askpass"],
+            dependencies: [
+                "ConstellationOpenSSH",
+                "constellation-askpass",
+                .product(name: "ConstellationTerminal", package: "ConstellationTerminal"),
+            ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]

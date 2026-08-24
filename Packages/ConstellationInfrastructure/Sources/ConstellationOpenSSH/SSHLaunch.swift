@@ -30,8 +30,11 @@ public struct SSHDestination: Sendable, Equatable {
         self.init(host: rest, user: user.flatMap { $0.isEmpty ? nil : $0 }, port: port)
     }
 
-    var argument: String {
-        if let user { "\(user)@\(host)" } else { host }
+    var hostArgument: String {
+        if host.hasPrefix("["), host.hasSuffix("]") {
+            return String(host.dropFirst().dropLast())
+        }
+        return host
     }
 }
 
@@ -57,7 +60,8 @@ public struct SSHLaunch: Sendable {
         if let identityFile { arguments += ["-i", identityFile, "-o", "IdentitiesOnly=yes"] }
         for option in options { arguments += ["-o", option] }
         if let port = destination.port { arguments += ["-p", String(port)] }
-        arguments.append(destination.argument)
+        if let user = destination.user { arguments += ["-l", user] }
+        arguments.append(destination.hostArgument)
         return TerminalCommand(executable: "/usr/bin/ssh", arguments: arguments, environment: environment)
     }
 }

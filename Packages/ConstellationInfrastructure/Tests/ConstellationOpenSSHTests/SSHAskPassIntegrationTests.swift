@@ -35,7 +35,10 @@ struct SSHAskPassIntegrationTests {
         defer { try? FileManager.default.removeItem(at: knownHosts) }
         var launch = SSHLaunch(destination: destination, hostKeyAlias: "constellation-test")
         launch.options = ["UserKnownHostsFile=\(knownHosts.path)", "PreferredAuthentications=password", "PubkeyAuthentication=no"]
-        let command = launch.command(environment: service.environment(token: token, credentialID: "target", helperPath: helper))
+        let statusChannel = SSHExitStatusChannel()
+        launch.options.append(contentsOf: statusChannel.connectionOptions)
+        let command = statusChannel.wrapping(
+            launch.command(environment: service.environment(token: token, credentialID: "target", helperPath: helper)))
 
         _ = NSApplication.shared
         let runtime = try GhosttyRuntime(appearance: .default)
@@ -46,11 +49,17 @@ struct SSHAskPassIntegrationTests {
         window.orderFrontRegardless()
         defer { session.close(); window.close() }
 
+        var didReportConnection = false
+        session.eventHandler = { event in
+            guard case .titleChanged(let title) = event else { return }
+            didReportConnection = didReportConnection || statusChannel.isConnectionTitle(title)
+        }
+
         let marker = "constellation-askpass-\(Int.random(in: 1000...9999))"
         var sentMarker = false
         let connected = waitUntil(.seconds(40)) {
             let screen = session.screenText()
-            if !sentMarker, screen.contains("$ ") {
+            if !sentMarker, didReportConnection, screen.contains("$ ") {
                 sentMarker = true
                 session.send(.text("echo \(marker)\n"))
             }
@@ -58,6 +67,7 @@ struct SSHAskPassIntegrationTests {
         }
         let screen = session.screenText()
         #expect(connected, "screen was: \(screen) state=\(session.processState)")
+        #expect(didReportConnection, "OpenSSH LocalCommand did not report a completed connection")
         #expect(!screen.contains("password:"), "ssh prompted in the terminal instead of askpass")
         #expect(prompts.contains { $0.kind == .confirm }, "no host-key confirmation reached askpass: \(prompts)")
         #expect(prompts.allSatisfy { $0.kind != .secret }, "vault-backed secret should not reach the user prompt")
