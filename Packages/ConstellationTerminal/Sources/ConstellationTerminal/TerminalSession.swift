@@ -11,6 +11,14 @@ public enum TerminalInput: Sendable, Equatable {
     case text(String)
 }
 
+public enum TerminalEvent: Sendable, Equatable {
+    case titleChanged(String)
+    case processExited(code: Int32, runtime: Duration)
+    case closeRequested(processAlive: Bool)
+    case bell
+    case rendererHealthChanged(Bool)
+}
+
 /// The app shell's view of one terminal. Protocol-specific behavior lives on the
 /// concrete session, not here.
 @MainActor
@@ -18,8 +26,10 @@ public protocol TerminalSession: AnyObject {
     var view: NSView { get }
     var title: String { get }
     var processState: TerminalProcessState { get }
+    var eventHandler: (@MainActor (TerminalEvent) -> Void)? { get set }
 
     func send(_ input: TerminalInput)
+    @discardableResult func performBinding(_ action: String) -> Bool
     func close()
 }
 
@@ -34,6 +44,7 @@ public final class GhosttyTerminalSession: TerminalSession {
     public private(set) var processState: TerminalProcessState = .running
     public private(set) var rendererHealthy = true
     public private(set) var isClosed = false
+    public var eventHandler: (@MainActor (TerminalEvent) -> Void)?
 
     /// Called when libghostty asks to close the surface: the user pressed a key
     /// after the process exited, or a close binding fired.
@@ -84,21 +95,26 @@ public final class GhosttyTerminalSession: TerminalSession {
 extension GhosttyTerminalSession: GhosttySurfaceViewDelegate {
     func surfaceView(_ view: GhosttySurfaceView, didSetTitle title: String) {
         self.title = title
+        eventHandler?(.titleChanged(title))
     }
 
     func surfaceView(_ view: GhosttySurfaceView, childExitedWithCode code: Int32, runtime: Duration) {
         processState = .exited(code: code)
+        eventHandler?(.processExited(code: code, runtime: runtime))
     }
 
     func surfaceViewDidRequestClose(_ view: GhosttySurfaceView, processAlive: Bool) {
+        eventHandler?(.closeRequested(processAlive: processAlive))
         onCloseRequest?(processAlive)
     }
 
     func surfaceViewDidRingBell(_ view: GhosttySurfaceView) {
+        eventHandler?(.bell)
         onBell?()
     }
 
     func surfaceView(_ view: GhosttySurfaceView, rendererHealthy healthy: Bool) {
         rendererHealthy = healthy
+        eventHandler?(.rendererHealthChanged(healthy))
     }
 }

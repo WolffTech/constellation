@@ -96,4 +96,17 @@ struct LocalShellSessionTests {
         #expect(after.columns > before.columns)
         #expect(after.rows > before.rows)
     }
+
+    @Test func searchBindingsReachTheSurface() throws {
+        let session = try Self.runtime().makeSession(command: TerminalCommand(executable: "/bin/cat"))
+        let window = host(session)
+        defer { session.close(); window.close() }
+
+        session.send(.text("first needle second needle\n"))
+        #expect(waitUntil { session.visibleText().contains("needle") })
+        #expect(session.performBinding("search:needle"))
+        #expect(session.performBinding("navigate_search:next"))
+        #expect(session.performBinding("navigate_search:previous"))
+        #expect(session.performBinding("end_search"))
+    }
 }

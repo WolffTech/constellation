@@ -90,6 +90,14 @@ public final class GhosttyRuntime {
         try GhosttyTerminalSession(runtime: self, command: command)
     }
 
+    /// Applies app-owned settings to existing and future surfaces.
+    public func updateAppearance(_ appearance: TerminalAppearance) throws {
+        let updated = try GhosttyConfig(appearance: appearance)
+        guard let app else { throw TerminalError.appCreationFailed }
+        ghostty_app_update_config(app, updated.handle)
+        config = updated
+    }
+
     func tick() {
         guard let app else { return }
         ghostty_app_tick(app)
