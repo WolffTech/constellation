@@ -6,6 +6,10 @@
 # Needs Homebrew cmake and openssl@3 (`brew install cmake openssl@3`) and the
 # Xcode command line tools. Rerun after bumping the submodule. LTO is off
 # because xcodebuild cannot wrap bitcode archives in an xcframework.
+# WITH_INTERNAL_MD4/MD5/RC4 compile WinPR's own hash/cipher code so NTLM (NLA)
+# never needs OpenSSL 3's legacy provider, which is a separate dylib that a
+# hardened-runtime app cannot dlopen — without this, NLA fails after the TLS
+# handshake with ERRCONNECT_CONNECT_TRANSPORT_FAILED.
 #
 # The default client channel set is built: rdpdr is required during connection
 # setup and it in turn registers rdpsnd, so rdpsnd stays in with only its
@@ -45,6 +49,9 @@ cmake -S "$SRC" -B "$BUILD" \
   -DOPENSSL_ROOT_DIR="$OPENSSL" \
   -DOPENSSL_USE_STATIC_LIBS=ON \
   -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF \
+  -DWITH_INTERNAL_MD4=ON \
+  -DWITH_INTERNAL_MD5=ON \
+  -DWITH_INTERNAL_RC4=ON \
   -DBUILD_SHARED_LIBS=OFF \
   -DBUILD_TESTING=OFF \
   -DBUILTIN_CHANNELS=ON \

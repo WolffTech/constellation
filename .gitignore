@@ -11,6 +11,8 @@ build/
 *.xcuserstate
 xcuserdata/
 .swiftpm/xcode/
+# SwiftPM resolves this per checkout; the app pins versions through the project.
+Packages/*/Package.resolved
 
 # Generated native products (rebuilt by Scripts/)
 Vendor/build/
