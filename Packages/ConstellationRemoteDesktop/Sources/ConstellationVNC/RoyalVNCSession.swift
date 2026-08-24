@@ -1,4 +1,5 @@
 import AppKit
+import ConstellationRemoteDesktop
 import Foundation
 import RoyalVNCKit
 
@@ -6,9 +7,9 @@ import RoyalVNCKit
 @MainActor
 public final class RoyalVNCSession: RemoteDesktopSession {
     public let view: NSView
-    public private(set) var state: VNCSessionState = .idle
+    public private(set) var state: RemoteDesktopSessionState = .idle
     public private(set) var framebufferSize: CGSize?
-    public var eventHandler: (@MainActor (VNCSessionEvent) -> Void)?
+    public var eventHandler: (@MainActor (RemoteDesktopSessionEvent) -> Void)?
     public var displayMode: RemoteDesktopDisplayMode = .fit {
         didSet { host.displayMode = displayMode }
     }
@@ -109,7 +110,7 @@ public final class RoyalVNCSession: RemoteDesktopSession {
 
     // MARK: Helpers
 
-    private func transition(to newState: VNCSessionState) {
+    private func transition(to newState: RemoteDesktopSessionState) {
         guard newState != state else { return }
         state = newState
         eventHandler?(.stateChanged(newState))
@@ -125,15 +126,15 @@ public final class RoyalVNCSession: RemoteDesktopSession {
     }
 
     /// Maps RoyalVNCKit's close reason. Cancelled and plain closes are clean.
-    static func failure(from error: Error?) -> VNCSessionFailure? {
+    static func failure(from error: Error?) -> RemoteDesktopSessionFailure? {
         guard let error else { return nil }
         if let vncError = error as? VNCError {
             guard vncError.shouldDisplayToUser else { return nil }
-            return VNCSessionFailure(
+            return RemoteDesktopSessionFailure(
                 message: vncError.localizedDescription,
                 isAuthenticationFailure: vncError.isAuthenticationError)
         }
-        return VNCSessionFailure(message: error.localizedDescription)
+        return RemoteDesktopSessionFailure(message: error.localizedDescription)
     }
 }
 

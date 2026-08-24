@@ -1,4 +1,5 @@
 import AppKit
+import ConstellationRemoteDesktop
 import RoyalVNCKit
 import Testing
 @testable import ConstellationVNC
@@ -22,7 +23,7 @@ struct RoyalVNCSessionTests {
 
     @Test func connectingToAClosedPortEndsDisconnectedWithAFailure() async throws {
         let session = RoyalVNCSession(configuration: VNCSessionConfiguration(host: "127.0.0.1", port: 1)) { _ in nil }
-        var states: [VNCSessionState] = []
+        var states: [RemoteDesktopSessionState] = []
         let finished = AsyncStream<Void>.makeStream()
         session.eventHandler = { event in
             if case .stateChanged(let state) = event {

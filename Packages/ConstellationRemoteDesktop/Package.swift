@@ -1,13 +1,15 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Remote desktop adapters. `ConstellationVNC` wraps RoyalVNCKit and
-// `ConstellationRDP` wraps FreeRDP through a C bridge, so the app shell never
+// Remote desktop adapters. `ConstellationRemoteDesktop` defines the session
+// surface the app shell uses; `ConstellationVNC` wraps RoyalVNCKit and
+// `ConstellationRDP` wraps FreeRDP through a C bridge, so the app never
 // imports either library directly.
 let package = Package(
     name: "ConstellationRemoteDesktop",
     platforms: [.macOS(.v15)],
     products: [
+        .library(name: "ConstellationRemoteDesktop", targets: ["ConstellationRemoteDesktop"]),
         .library(name: "ConstellationVNC", targets: ["ConstellationVNC"]),
         .library(name: "ConstellationRDP", targets: ["ConstellationRDP"]),
     ],
@@ -17,9 +19,15 @@ let package = Package(
         .package(url: "https://github.com/royalapplications/royalvnc.git", revision: "92d4427c73817d8f849bb289ff190aa4b40c44ea"),
     ],
     targets: [
+        // Protocol-neutral session surface the app shell talks to.
+        .target(
+            name: "ConstellationRemoteDesktop",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .target(
             name: "ConstellationVNC",
             dependencies: [
+                "ConstellationRemoteDesktop",
                 .product(name: "RoyalVNCKit", package: "royalvnc"),
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
@@ -44,7 +52,7 @@ let package = Package(
         ),
         .target(
             name: "ConstellationRDP",
-            dependencies: ["CConstellationRDP", "FreeRDPKit"],
+            dependencies: ["ConstellationRemoteDesktop", "CConstellationRDP", "FreeRDPKit"],
             swiftSettings: [.swiftLanguageMode(.v6)],
             linkerSettings: [
                 // WinPR's Apple sources use CoreFoundation via Foundation;

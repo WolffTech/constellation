@@ -1,22 +1,18 @@
 import AppKit
 import CConstellationRDP
+import ConstellationRemoteDesktop
 import Foundation
 
 /// One FreeRDP connection and the AppKit view that shows it. Everything public
 /// happens on the main actor; the C bridge's callbacks arrive on the client
 /// thread and hop here.
-///
-/// This is the Milestone 4 proof adapter. It is deliberately self-contained and
-/// does not yet conform to the shared `RemoteDesktopSession` protocol or plug
-/// into the app shell; unifying the VNC and RDP session surfaces is milestone
-/// work once the proof holds.
 @MainActor
-public final class RDPSession {
+public final class RDPSession: RemoteDesktopSession {
     public let view: NSView
-    public private(set) var state: RDPSessionState = .idle
+    public private(set) var state: RemoteDesktopSessionState = .idle
     public private(set) var framebufferSize: CGSize?
-    public var eventHandler: (@MainActor (RDPSessionEvent) -> Void)?
-    public var displayMode: RDPDisplayMode = .fit {
+    public var eventHandler: (@MainActor (RemoteDesktopSessionEvent) -> Void)?
+    public var displayMode: RemoteDesktopDisplayMode = .fit {
         didSet { host.displayMode = displayMode }
     }
 
@@ -27,6 +23,8 @@ public final class RDPSession {
     private let surface = RDPSurfaceView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
     private var handle: OpaquePointer?
     private var connectTask: Task<Void, Never>?
+    private var resizeTask: Task<Void, Never>?
+    private var requestedSize: CGSize?
 
     public init(
         configuration: RDPSessionConfiguration,
@@ -39,9 +37,13 @@ public final class RDPSession {
         host = RDPHostView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
         view = host
         surface.inputSink = { [weak self] event in self?.handle(input: event) }
+        if configuration.dynamicResolution {
+            host.onFitSizeChanged = { [weak self] size in self?.scheduleResolutionRequest(size) }
+        }
     }
 
     isolated deinit {
+        resizeTask?.cancel()
         if let handle { crdp_session_free(handle) }
     }
 
@@ -65,15 +67,14 @@ public final class RDPSession {
         crdp_session_disconnect(handle)
     }
 
-    /// Hands keyboard focus to the remote desktop view.
     public func focus() {
         surface.window?.makeFirstResponder(surface)
     }
 
-    /// Requests a new desktop resolution (no-op unless dynamic resolution was
-    /// negotiated and the session is connected).
+    /// Asks the server for a new desktop size. A no-op unless dynamic
+    /// resolution was negotiated and the session is connected.
     public func requestResolution(width: Int, height: Int) {
-        guard let handle else { return }
+        guard let handle, state == .connected else { return }
         crdp_session_request_resolution(handle, UInt32(max(0, width)), UInt32(max(0, height)))
     }
 
@@ -87,6 +88,8 @@ public final class RDPSession {
             frame_updated: rdpFrameUpdated,
             verify_certificate: rdpVerifyCertificate)
 
+        // The password is copied into FreeRDP's settings and this stack frame
+        // is the only other place it lives.
         configuration.host.withCString { hostPtr in
             withOptionalCString(configuration.username) { userPtr in
                 withOptionalCString(configuration.domain) { domainPtr in
@@ -109,7 +112,7 @@ public final class RDPSession {
         }
 
         guard handle != nil else {
-            transition(to: .disconnected(RDPSessionFailure(kind: .generic, message: "Could not create the RDP session.")))
+            transition(to: .disconnected(RemoteDesktopSessionFailure(message: Self.createFailureMessage)))
             return
         }
         crdp_session_connect(handle)
@@ -124,7 +127,10 @@ public final class RDPSession {
         case CRDP_STATE_CONNECTED:
             transition(to: .connected)
             focus()
+            // The initial size came from configuration; catch up with the view.
+            requestFitResolution()
         case CRDP_STATE_DISCONNECTED:
+            resizeTask?.cancel()
             transition(to: .disconnected(Self.failure(from: failure)))
         default:
             break
@@ -137,6 +143,9 @@ public final class RDPSession {
         framebufferSize = size
         host.show(surface, framebufferSize: size)
         eventHandler?(.framebufferSizeChanged(width: width, height: height))
+        // The first frame uses the configured size; once the view is on screen
+        // and laid out, ask the desktop to match it. A no-op if already equal.
+        requestFitResolution()
     }
 
     fileprivate func frameUpdated() {
@@ -148,6 +157,28 @@ public final class RDPSession {
     }
 
     // MARK: Helpers
+
+    /// Asks the desktop to match the current fitted view size. Used on connect,
+    /// on the first frame and whenever the view lays out, so the remote desktop
+    /// tracks the window without waiting for a manual resize.
+    private func requestFitResolution() {
+        guard configuration.dynamicResolution, displayMode == .fit else { return }
+        scheduleResolutionRequest(host.fitSize)
+    }
+
+    /// Coalesces window resizes so the server sees one layout per pause.
+    private func scheduleResolutionRequest(_ size: CGSize) {
+        let target = CGSize(width: size.width.rounded(.down), height: size.height.rounded(.down))
+        guard target.width >= 200, target.height >= 200, target != requestedSize else { return }
+        resizeTask?.cancel()
+        resizeTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self else { return }
+            guard self.framebufferSize != target else { return }
+            self.requestedSize = target
+            self.requestResolution(width: Int(target.width), height: Int(target.height))
+        }
+    }
 
     private func handle(input event: RDPInputEvent) {
         guard let handle else { return }
@@ -177,26 +208,35 @@ public final class RDPSession {
         }
     }
 
-    private func transition(to newState: RDPSessionState) {
+    private func transition(to newState: RemoteDesktopSessionState) {
         guard newState != state else { return }
         state = newState
         eventHandler?(.stateChanged(newState))
     }
 
-    static func failure(from failure: crdp_failure) -> RDPSessionFailure? {
+    static let createFailureMessage = "Could not create the RDP session."
+    static let authenticationFailureMessage = "Authentication failed. Check the username, domain and password."
+    static let dnsFailureMessage = "The server could not be found."
+    static let tlsFailureMessage = "The secure connection could not be established."
+    static let connectFailureMessage = "The connection to the server did not complete."
+    static let genericFailureMessage = "The connection ended unexpectedly."
+
+    /// Maps the bridge's failure class. Clean closes and user cancellations
+    /// (a rejected certificate) are not failures.
+    static func failure(from failure: crdp_failure) -> RemoteDesktopSessionFailure? {
         switch failure {
         case CRDP_FAILURE_NONE, CRDP_FAILURE_CANCELLED:
             return nil
         case CRDP_FAILURE_AUTHENTICATION:
-            return RDPSessionFailure(kind: .authentication, message: "Authentication failed.")
+            return RemoteDesktopSessionFailure(message: authenticationFailureMessage, isAuthenticationFailure: true)
         case CRDP_FAILURE_DNS:
-            return RDPSessionFailure(kind: .dns, message: "The server could not be found.")
+            return RemoteDesktopSessionFailure(message: dnsFailureMessage)
         case CRDP_FAILURE_TLS:
-            return RDPSessionFailure(kind: .tls, message: "The secure connection could not be established.")
+            return RemoteDesktopSessionFailure(message: tlsFailureMessage)
         case CRDP_FAILURE_CONNECT:
-            return RDPSessionFailure(kind: .connect, message: "Could not reach the server.")
+            return RemoteDesktopSessionFailure(message: connectFailureMessage)
         default:
-            return RDPSessionFailure(kind: .generic, message: "The connection ended unexpectedly.")
+            return RemoteDesktopSessionFailure(message: genericFailureMessage)
         }
     }
 }

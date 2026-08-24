@@ -8,8 +8,8 @@ public struct RDPSessionConfiguration: Sendable, Equatable {
     public var port: Int
     public var username: String?
     public var domain: String?
-    /// Initial desktop size. The server may resize; with `dynamicResolution`
-    /// the client can request new sizes as the window changes.
+    /// Initial desktop size in points. With `dynamicResolution` the session
+    /// asks the server to follow the view size afterwards.
     public var width: Int
     public var height: Int
     public var dynamicResolution: Bool
@@ -40,49 +40,6 @@ public struct RDPSessionConfiguration: Sendable, Equatable {
 /// aborts before connecting.
 public typealias RDPPasswordProvider = @MainActor @Sendable () async -> String?
 
-public enum RDPSessionFailureKind: Sendable, Equatable {
-    case generic
-    case authentication
-    case cancelled
-    case dns
-    case tls
-    case connect
-}
-
-public struct RDPSessionFailure: Error, Sendable, Equatable, LocalizedError {
-    public var kind: RDPSessionFailureKind
-    public var message: String
-
-    public init(kind: RDPSessionFailureKind, message: String) {
-        self.kind = kind
-        self.message = message
-    }
-
-    public var isAuthenticationFailure: Bool { kind == .authentication }
-    public var errorDescription: String? { message }
-}
-
-public enum RDPSessionState: Sendable, Equatable {
-    case idle
-    case connecting
-    case connected
-    case disconnecting
-    /// `nil` is a clean close.
-    case disconnected(RDPSessionFailure?)
-
-    public var isLive: Bool {
-        switch self {
-        case .connecting, .connected, .disconnecting: true
-        case .idle, .disconnected: false
-        }
-    }
-}
-
-public enum RDPSessionEvent: Sendable, Equatable {
-    case stateChanged(RDPSessionState)
-    case framebufferSizeChanged(width: Int, height: Int)
-}
-
 /// A server certificate presented for approval. Mirrors the C bridge's view.
 public struct RDPCertificate: Sendable, Equatable {
     public var host: String
@@ -93,21 +50,27 @@ public struct RDPCertificate: Sendable, Equatable {
     public var fingerprint: String
     public var hostMismatch: Bool
     public var changed: Bool
+
+    public init(host: String, port: Int, commonName: String, subject: String, issuer: String, fingerprint: String, hostMismatch: Bool, changed: Bool) {
+        self.host = host
+        self.port = port
+        self.commonName = commonName
+        self.subject = subject
+        self.issuer = issuer
+        self.fingerprint = fingerprint
+        self.hostMismatch = hostMismatch
+        self.changed = changed
+    }
 }
 
 public enum RDPCertificateVerdict: Sendable, Equatable {
     case reject
     case acceptOnce
+    /// Lets FreeRDP record the certificate in its own known-hosts file.
     case acceptAndStore
 }
 
-/// Decides whether to trust a server certificate. Called off the main actor's
-/// UI work but hopped to the main actor here; it blocks connection setup until
-/// it returns, which is how the native prompt pauses the connection.
+/// Decides whether to trust a server certificate. Runs on the main actor while
+/// FreeRDP's client thread waits, which is how a native prompt pauses
+/// connection setup.
 public typealias RDPCertificateVerifier = @MainActor @Sendable (RDPCertificate) async -> RDPCertificateVerdict
-
-/// How the remote framebuffer maps onto the host view. Matches the VNC adapter.
-public enum RDPDisplayMode: Sendable, Equatable, CaseIterable {
-    case fit
-    case actualSize
-}

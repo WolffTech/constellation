@@ -1,9 +1,10 @@
 import AppKit
 import ConstellationCore
 import ConstellationOpenSSH
+import ConstellationRDP
+import ConstellationRemoteDesktop
 import ConstellationStorage
 import ConstellationTerminal
-import ConstellationVNC
 import Foundation
 import Observation
 
@@ -44,7 +45,8 @@ final class CompositionRoot {
                 library: library,
                 prober: TCPAddressProber(),
                 driver: driver,
-                vncDriver: RoyalVNCSessionDriver(vault: vault))
+                vncDriver: RoyalVNCSessionDriver(vault: vault),
+                rdpDriver: FreeRDPSessionDriver(vault: vault))
         } catch {
             startupError = error.localizedDescription
         }

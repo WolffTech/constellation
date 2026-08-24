@@ -1,4 +1,5 @@
 import AppKit
+import ConstellationRemoteDesktop
 import Testing
 @testable import ConstellationVNC
 
@@ -32,7 +33,7 @@ struct VNCProofTests {
         window.contentView = session.view
 
         var sizes: [(Int, Int)] = []
-        let outcome = AsyncStream<VNCSessionState>.makeStream()
+        let outcome = AsyncStream<RemoteDesktopSessionState>.makeStream()
         session.eventHandler = { event in
             switch event {
             case .framebufferSizeChanged(let width, let height):

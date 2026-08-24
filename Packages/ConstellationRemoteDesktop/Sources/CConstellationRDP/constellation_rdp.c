@@ -9,6 +9,9 @@
 #include <freerdp/freerdp.h>
 #include <freerdp/client.h>
 #include <freerdp/client/channels.h>
+#include <freerdp/client/rdpgfx.h>
+#include <freerdp/channels/rdpgfx.h>
+#include <freerdp/gdi/gfx.h>
 #include <freerdp/client/disp.h>
 #include <freerdp/channels/disp.h>
 #include <freerdp/channels/channels.h>
@@ -22,7 +25,10 @@
 #include <winpr/synch.h>
 #include <winpr/thread.h>
 #include <winpr/input.h>
+#include <winpr/wlog.h>
+#include <os/log.h>
 
+#include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -32,7 +38,32 @@ typedef struct {
     rdpClientContext common;
     crdp_session *session;
     HANDLE stop_event;
+    HANDLE command_event; // signals queued input/resolution to the client thread
 } crdpContext;
+
+// Everything that writes to the RDP transport must run on the client thread;
+// the app enqueues these from the main thread and the client thread drains them.
+typedef enum {
+    CRDP_CMD_POINTER,
+    CRDP_CMD_POINTER_EX,
+    CRDP_CMD_KEY,
+    CRDP_CMD_KEY_UNICODE,
+    CRDP_CMD_SYNCHRONIZE,
+    CRDP_CMD_RESOLUTION,
+} crdp_command_type;
+
+typedef struct {
+    crdp_command_type type;
+    uint16_t flags;
+    uint16_t x;
+    uint16_t y;
+    uint8_t scancode;
+    uint16_t code;
+    uint32_t a; // synchronize toggle flags, or resolution width
+    uint32_t b; // resolution height
+} crdp_command;
+
+#define CRDP_COMMAND_CAPACITY 1024
 
 struct crdp_session {
     rdpContext *context;
@@ -43,8 +74,83 @@ struct crdp_session {
     char *password;
     crdp_callbacks callbacks;
     DispClientContext *disp; // captured when the Display Control channel connects
+    // A resolution requested before the server is ready; sent once it is.
+    uint32_t pending_width;
+    uint32_t pending_height;
+    bool disp_ready; // Display Control caps received; layouts accepted now
     volatile bool connected;
+    // Tracks the buffer the Swift side last saw, so a GFX ResetGraphics realloc
+    // is reported as a resize rather than an update against a stale pointer.
+    const uint8_t *last_gfx_buffer;
+    uint32_t last_gfx_width;
+    uint32_t last_gfx_height;
+    uint32_t last_gfx_stride;
+
+    // Input/resolution command queue, drained on the client thread.
+    pthread_mutex_t command_lock;
+    crdp_command commands[CRDP_COMMAND_CAPACITY];
+    size_t command_head;
+    size_t command_count;
 };
+
+// Appends a command and wakes the client thread. Drops the oldest command if
+// the queue is full (only stale pointer moves are ever lost).
+static void crdp_enqueue(crdp_session *session, crdp_command command) {
+    if (!session || !session->context)
+        return;
+    pthread_mutex_lock(&session->command_lock);
+    if (session->command_count == CRDP_COMMAND_CAPACITY) {
+        session->command_head = (session->command_head + 1) % CRDP_COMMAND_CAPACITY;
+        session->command_count--;
+    }
+    size_t tail = (session->command_head + session->command_count) % CRDP_COMMAND_CAPACITY;
+    session->commands[tail] = command;
+    session->command_count++;
+    pthread_mutex_unlock(&session->command_lock);
+    SetEvent(((crdpContext *)session->context)->command_event);
+}
+
+static bool crdp_dequeue(crdp_session *session, crdp_command *command) {
+    bool ok = false;
+    pthread_mutex_lock(&session->command_lock);
+    if (session->command_count > 0) {
+        *command = session->commands[session->command_head];
+        session->command_head = (session->command_head + 1) % CRDP_COMMAND_CAPACITY;
+        session->command_count--;
+        ok = true;
+    }
+    pthread_mutex_unlock(&session->command_lock);
+    return ok;
+}
+
+static wLog *crdp_log(void) {
+    return WLog_Get("com.constellation.rdp");
+}
+
+static os_log_t crdp_oslog(void) {
+    static os_log_t log;
+    static bool created;
+    if (!created) {
+        log = os_log_create("tech.wolff.Constellation", "rdp");
+        created = true;
+    }
+    return log;
+}
+
+static void crdp_send_layout(crdp_session *session, uint32_t width, uint32_t height) {
+    DISPLAY_CONTROL_MONITOR_LAYOUT layout = { 0 };
+    layout.Flags = DISPLAY_CONTROL_MONITOR_PRIMARY;
+    layout.Left = 0;
+    layout.Top = 0;
+    layout.Width = width;
+    layout.Height = height;
+    layout.Orientation = ORIENTATION_LANDSCAPE;
+    layout.DesktopScaleFactor = 100;
+    layout.DeviceScaleFactor = 100;
+    UINT rc = session->disp->SendMonitorLayout(session->disp, 1, &layout);
+    WLog_Print(crdp_log(), rc == CHANNEL_RC_OK ? WLOG_DEBUG : WLOG_WARN,
+               "SendMonitorLayout %" PRIu32 "x%" PRIu32 " -> %" PRIu32, width, height, rc);
+}
 
 // MARK: - Helpers
 
@@ -125,6 +231,7 @@ static BOOL crdp_desktop_resize(rdpContext *context) {
     const UINT32 height = freerdp_settings_get_uint32(context->settings, FreeRDP_DesktopHeight);
     if (!gdi_resize(gdi, width, height))
         return FALSE;
+    os_log(crdp_oslog(), "rdp desktop_resize %ux%u", width, height);
 
     if (session->callbacks.frame_resized) {
         session->callbacks.frame_resized(session->callbacks.context, gdi->primary_buffer,
@@ -133,19 +240,81 @@ static BOOL crdp_desktop_resize(rdpContext *context) {
     return TRUE;
 }
 
+// MARK: - Graphics pipeline (RDPGFX)
+
+// The GFX pipeline composites into gdi->primary_buffer, then calls this to
+// present. gdi may have reallocated the buffer on a resize, so report a resize
+// when the buffer or size changed and a plain update otherwise.
+static UINT crdp_gfx_update_window(RdpgfxClientContext *gfx, gdiGfxSurface *surface) {
+    (void)surface;
+    rdpGdi *gdi = (rdpGdi *)gfx->custom;
+    if (!gdi || !gdi->context)
+        return CHANNEL_RC_OK;
+    crdp_session *session = ((crdpContext *)gdi->context)->session;
+
+    const bool changed = gdi->primary_buffer != session->last_gfx_buffer ||
+                         (uint32_t)gdi->width != session->last_gfx_width ||
+                         (uint32_t)gdi->height != session->last_gfx_height ||
+                         gdi->stride != session->last_gfx_stride;
+    if (changed) {
+        session->last_gfx_buffer = gdi->primary_buffer;
+        session->last_gfx_width = (uint32_t)gdi->width;
+        session->last_gfx_height = (uint32_t)gdi->height;
+        session->last_gfx_stride = gdi->stride;
+        if (session->callbacks.frame_resized) {
+            session->callbacks.frame_resized(session->callbacks.context, gdi->primary_buffer,
+                                             (uint32_t)gdi->width, (uint32_t)gdi->height, gdi->stride);
+        }
+    } else if (session->callbacks.frame_updated) {
+        session->callbacks.frame_updated(session->callbacks.context, 0, 0,
+                                         (uint32_t)gdi->width, (uint32_t)gdi->height);
+    }
+    return CHANNEL_RC_OK;
+}
+
 // MARK: - Channel wiring
+
+// The server sends Display Control capabilities shortly after the channel
+// opens; only then will it accept a monitor layout. Send whatever was queued.
+static UINT crdp_disp_caps(DispClientContext *disp, UINT32 maxNumMonitors,
+                           UINT32 maxMonitorAreaFactorA, UINT32 maxMonitorAreaFactorB) {
+    (void)maxNumMonitors;
+    (void)maxMonitorAreaFactorA;
+    (void)maxMonitorAreaFactorB;
+    crdp_session *session = (crdp_session *)disp->custom;
+    if (!session)
+        return CHANNEL_RC_OK;
+    session->disp_ready = true;
+    if (session->pending_width && session->pending_height) {
+        crdp_send_layout(session, session->pending_width, session->pending_height);
+        session->pending_width = session->pending_height = 0;
+    }
+    return CHANNEL_RC_OK;
+}
 
 static void crdp_on_channel_connected(void *context, const ChannelConnectedEventArgs *e) {
     crdp_session *session = ((crdpContext *)context)->session;
-    if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0)
+    if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0) {
         session->disp = (DispClientContext *)e->pInterface;
+        session->disp->custom = session;
+        session->disp->DisplayControlCaps = crdp_disp_caps;
+    }
     freerdp_client_OnChannelConnectedEventHandler(context, e);
+
+    // The default handler above initializes gdi's GFX pipeline; route its
+    // presentation callback to us so GFX frames reach the view.
+    if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) == 0) {
+        RdpgfxClientContext *gfx = (RdpgfxClientContext *)e->pInterface;
+        gfx->UpdateWindowFromSurface = crdp_gfx_update_window;
+    }
 }
 
 static void crdp_on_channel_disconnected(void *context, const ChannelDisconnectedEventArgs *e) {
     crdp_session *session = ((crdpContext *)context)->session;
-    if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0)
+    if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0) {
         session->disp = NULL;
+        session->disp_ready = false;
+    }
     freerdp_client_OnChannelDisconnectedEventHandler(context, e);
 }
 
@@ -176,6 +345,15 @@ static BOOL crdp_post_connect(freerdp *instance) {
     rdpContext *context = instance->context;
     rdpGdi *gdi = context->gdi;
     crdp_session *session = ((crdpContext *)context)->session;
+    rdpSettings *settings = context->settings;
+    os_log(crdp_oslog(),
+           "rdp post_connect %ux%u depth=%u rfx=%d gfx=%d nsc=%d autodetect=%d",
+           (uint32_t)gdi->width, (uint32_t)gdi->height,
+           freerdp_settings_get_uint32(settings, FreeRDP_ColorDepth),
+           freerdp_settings_get_bool(settings, FreeRDP_RemoteFxCodec),
+           freerdp_settings_get_bool(settings, FreeRDP_SupportGraphicsPipeline),
+           freerdp_settings_get_bool(settings, FreeRDP_NSCodec),
+           freerdp_settings_get_bool(settings, FreeRDP_NetworkAutoDetect));
     if (session->callbacks.frame_resized) {
         session->callbacks.frame_resized(session->callbacks.context, gdi->primary_buffer,
                                          (uint32_t)gdi->width, (uint32_t)gdi->height, gdi->stride);
@@ -242,6 +420,54 @@ static DWORD crdp_verify_changed_certificate_ex(freerdp *instance, const char *h
                                        new_fingerprint, TRUE, flags);
 }
 
+// MARK: - Command execution (client thread only)
+
+// Runs a resolution request now that we are on the client thread. Holds it
+// until the server's Display Control caps arrive.
+static void crdp_apply_resolution(crdp_session *session, uint32_t width, uint32_t height) {
+    if (!session->connected || !session->config.dynamic_resolution)
+        return;
+    width &= ~1u; // MS-RDPEDISP: even width, 200..8192 per side
+    if (width < 200 || height < 200 || width > 8192 || height > 8192)
+        return;
+    if (!session->disp || !session->disp->SendMonitorLayout || !session->disp_ready) {
+        session->pending_width = width;
+        session->pending_height = height;
+        return;
+    }
+    crdp_send_layout(session, width, height);
+}
+
+static void crdp_execute(crdp_session *session, const crdp_command *command) {
+    rdpInput *input = session->context->input;
+    switch (command->type) {
+        case CRDP_CMD_POINTER:
+            freerdp_input_send_mouse_event(input, command->flags, command->x, command->y);
+            break;
+        case CRDP_CMD_POINTER_EX:
+            freerdp_input_send_extended_mouse_event(input, command->flags, command->x, command->y);
+            break;
+        case CRDP_CMD_KEY:
+            freerdp_input_send_keyboard_event(input, command->flags, command->scancode);
+            break;
+        case CRDP_CMD_KEY_UNICODE:
+            freerdp_input_send_unicode_keyboard_event(input, command->flags, command->code);
+            break;
+        case CRDP_CMD_SYNCHRONIZE:
+            freerdp_input_send_synchronize_event(input, command->a);
+            break;
+        case CRDP_CMD_RESOLUTION:
+            crdp_apply_resolution(session, command->a, command->b);
+            break;
+    }
+}
+
+static void crdp_drain_commands(crdp_session *session) {
+    crdp_command command;
+    while (session->connected && crdp_dequeue(session, &command))
+        crdp_execute(session, &command);
+}
+
 // MARK: - Client thread
 
 static DWORD WINAPI crdp_client_thread(LPVOID param) {
@@ -260,10 +486,14 @@ static DWORD WINAPI crdp_client_thread(LPVOID param) {
     session->connected = true;
     emit_state(session, CRDP_STATE_CONNECTED, CRDP_FAILURE_NONE);
 
+    // Send anything queued before the loop started waiting.
+    crdp_drain_commands(session);
+
     HANDLE handles[64];
     while (!freerdp_shall_disconnect_context(context)) {
         DWORD count = 0;
         handles[count++] = cctx->stop_event;
+        handles[count++] = cctx->command_event;
 
         DWORD extra = freerdp_get_event_handles(context, &handles[count], 64 - count);
         if (extra == 0)
@@ -275,6 +505,10 @@ static DWORD WINAPI crdp_client_thread(LPVOID param) {
             break;
         if (wait == WAIT_FAILED)
             break;
+
+        // Input and resolution changes are queued from the main thread; run
+        // them here so the transport is only ever touched by this thread.
+        crdp_drain_commands(session);
 
         if (!freerdp_check_event_handles(context))
             break;
@@ -299,7 +533,8 @@ static BOOL crdp_client_new(freerdp *instance, rdpContext *context) {
     instance->VerifyChangedCertificateEx = crdp_verify_changed_certificate_ex;
 
     cctx->stop_event = CreateEvent(NULL, TRUE, FALSE, NULL);
-    return cctx->stop_event != NULL;
+    cctx->command_event = CreateEvent(NULL, FALSE, FALSE, NULL);
+    return cctx->stop_event != NULL && cctx->command_event != NULL;
 }
 
 static void crdp_client_free(freerdp *instance, rdpContext *context) {
@@ -308,6 +543,10 @@ static void crdp_client_free(freerdp *instance, rdpContext *context) {
     if (cctx->stop_event) {
         CloseHandle(cctx->stop_event);
         cctx->stop_event = NULL;
+    }
+    if (cctx->command_event) {
+        CloseHandle(cctx->command_event);
+        cctx->command_event = NULL;
     }
 }
 
@@ -330,6 +569,7 @@ crdp_session *crdp_session_create(const crdp_config *config, const crdp_callback
 
     session->config = *config;
     session->callbacks = *callbacks;
+    pthread_mutex_init(&session->command_lock, NULL);
     session->host = dup_or_null(config->host);
     session->username = dup_or_null(config->username);
     session->domain = dup_or_null(config->domain);
@@ -367,11 +607,15 @@ crdp_session *crdp_session_create(const crdp_config *config, const crdp_callback
     freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, config->height);
     freerdp_settings_set_uint32(settings, FreeRDP_ColorDepth, 32);
 
-    // Software GDI paints into primary_buffer; the graphics pipeline would
-    // bypass it. The proof renders the plain bitmap path.
+    // Software GDI composites everything (legacy bitmaps, RemoteFX and the GFX
+    // pipeline) into primary_buffer. Modern Windows drives the screen through
+    // the Graphics Pipeline, so it must be on or the desktop freezes after the
+    // first frame. H.264 stays out (no decoder is built), so the server uses
+    // RemoteFX Progressive over GFX, which FreeRDP decodes itself.
     freerdp_settings_set_bool(settings, FreeRDP_SoftwareGdi, TRUE);
-    freerdp_settings_set_bool(settings, FreeRDP_SupportGraphicsPipeline, FALSE);
-    freerdp_settings_set_bool(settings, FreeRDP_RemoteFxCodec, FALSE);
+    freerdp_settings_set_bool(settings, FreeRDP_SupportGraphicsPipeline, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_RemoteFxCodec, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_NSCodec, TRUE);
 
     // Channel loading is driven by these flags; anything the build script left
     // out (audio, video, remote assistance, RemoteApp, WebAuthn, credential
@@ -430,6 +674,7 @@ void crdp_session_free(crdp_session *session) {
         free(session->password);
     }
     free(session->domain);
+    pthread_mutex_destroy(&session->command_lock);
     free(session);
 }
 
@@ -438,51 +683,38 @@ void crdp_session_free(crdp_session *session) {
 void crdp_session_send_pointer(crdp_session *session, uint16_t flags, uint16_t x, uint16_t y) {
     if (!session || !session->connected)
         return;
-    freerdp_input_send_mouse_event(session->context->input, flags, x, y);
+    crdp_enqueue(session, (crdp_command){ .type = CRDP_CMD_POINTER, .flags = flags, .x = x, .y = y });
 }
 
 void crdp_session_send_pointer_extended(crdp_session *session, uint16_t flags, uint16_t x,
                                         uint16_t y) {
     if (!session || !session->connected)
         return;
-    freerdp_input_send_extended_mouse_event(session->context->input, flags, x, y);
+    crdp_enqueue(session, (crdp_command){ .type = CRDP_CMD_POINTER_EX, .flags = flags, .x = x, .y = y });
 }
 
 void crdp_session_send_key(crdp_session *session, uint16_t flags, uint8_t scancode) {
     if (!session || !session->connected)
         return;
-    freerdp_input_send_keyboard_event(session->context->input, flags, scancode);
+    crdp_enqueue(session, (crdp_command){ .type = CRDP_CMD_KEY, .flags = flags, .scancode = scancode });
 }
 
 void crdp_session_send_key_unicode(crdp_session *session, uint16_t flags, uint16_t code) {
     if (!session || !session->connected)
         return;
-    freerdp_input_send_unicode_keyboard_event(session->context->input, flags, code);
+    crdp_enqueue(session, (crdp_command){ .type = CRDP_CMD_KEY_UNICODE, .flags = flags, .code = code });
 }
 
 void crdp_session_send_synchronize(crdp_session *session, uint32_t toggle_flags) {
     if (!session || !session->connected)
         return;
-    freerdp_input_send_synchronize_event(session->context->input, toggle_flags);
+    crdp_enqueue(session, (crdp_command){ .type = CRDP_CMD_SYNCHRONIZE, .a = toggle_flags });
 }
 
 void crdp_session_request_resolution(crdp_session *session, uint32_t width, uint32_t height) {
-    if (!session || !session->connected || !session->disp || !session->disp->SendMonitorLayout)
+    if (!session || !session->connected || !session->config.dynamic_resolution)
         return;
-
-    freerdp_settings_set_uint32(session->context->settings, FreeRDP_DesktopWidth, width);
-    freerdp_settings_set_uint32(session->context->settings, FreeRDP_DesktopHeight, height);
-
-    DISPLAY_CONTROL_MONITOR_LAYOUT layout = { 0 };
-    layout.Flags = DISPLAY_CONTROL_MONITOR_PRIMARY;
-    layout.Left = 0;
-    layout.Top = 0;
-    layout.Width = width;
-    layout.Height = height;
-    layout.Orientation = ORIENTATION_LANDSCAPE;
-    layout.DesktopScaleFactor = 100;
-    layout.DeviceScaleFactor = 100;
-    session->disp->SendMonitorLayout(session->disp, 1, &layout);
+    crdp_enqueue(session, (crdp_command){ .type = CRDP_CMD_RESOLUTION, .a = width, .b = height });
 }
 
 uint8_t crdp_scancode_for_mac_keycode(uint16_t mac_keycode, bool *extended) {

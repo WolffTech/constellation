@@ -1,16 +1,22 @@
 import AppKit
+import ConstellationRemoteDesktop
 
-/// Hosts the RDP surface in a scroll view and applies the display mode. Mirrors
-/// the VNC host: "fit" scales the surface down to the clip view, "actual size"
-/// keeps one remote pixel per point and scrolls.
+/// Hosts the RDP surface in a scroll view and applies the display mode. "Fit"
+/// scales the surface down to the clip view and reports the clip size so a
+/// session with dynamic resolution can ask the server to match it; "actual
+/// size" keeps one remote pixel per point and scrolls.
 @MainActor
 final class RDPHostView: NSView {
-    var displayMode: RDPDisplayMode = .fit {
+    var displayMode: RemoteDesktopDisplayMode = .fit {
         didSet { applyDisplayMode() }
     }
 
+    /// Called with the clip size whenever it changes while in `.fit` mode.
+    var onFitSizeChanged: ((CGSize) -> Void)?
+
     private let scrollView = NSScrollView(frame: .zero)
     private var framebufferSize: CGSize = .zero
+    private var lastReportedFitSize: CGSize = .zero
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -31,6 +37,9 @@ final class RDPHostView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// The size a fitted desktop would have: the clip view's bounds.
+    var fitSize: CGSize { scrollView.contentView.bounds.size }
+
     func show(_ view: NSView, framebufferSize: CGSize) {
         self.framebufferSize = framebufferSize
         if scrollView.documentView !== view {
@@ -46,7 +55,20 @@ final class RDPHostView: NSView {
 
     override func layout() {
         super.layout()
-        if displayMode == .fit { applyDisplayMode() }
+        if displayMode == .fit {
+            applyDisplayMode()
+            reportFitSizeIfChanged()
+        }
+    }
+
+    private func reportFitSizeIfChanged() {
+        let size = fitSize
+        guard size.width > 0, size.height > 0 else { return }
+        // Report every layout (not just on change): the size may be unchanged
+        // since before the session connected, but the desktop still needs to be
+        // told once connected. The session debounces and ignores no-ops.
+        lastReportedFitSize = size
+        onFitSizeChanged?(size)
     }
 
     private func applyDisplayMode() {
@@ -55,9 +77,10 @@ final class RDPHostView: NSView {
         case .fit:
             scrollView.hasVerticalScroller = false
             scrollView.hasHorizontalScroller = false
-            let clip = scrollView.contentView.bounds.size
-            // Scale down to fit while preserving aspect; never up.
-            let scale = min(1, min(clip.width / framebufferSize.width, clip.height / framebufferSize.height))
+            let clip = fitSize
+            // Fill the view while preserving aspect. Dynamic resolution makes the
+            // desktop match the view; until it does, scaling avoids a tiny image.
+            let scale = min(clip.width / framebufferSize.width, clip.height / framebufferSize.height)
             let size = CGSize(width: framebufferSize.width * scale, height: framebufferSize.height * scale)
             let origin = CGPoint(x: (clip.width - size.width) / 2, y: (clip.height - size.height) / 2)
             document.frame = NSRect(origin: origin, size: size)

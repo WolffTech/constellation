@@ -81,12 +81,23 @@ struct MachineEditorView: View {
                         onMakeDefault: { draft.machine.defaultProfileID = profile.id },
                         onRemove: { draft.removeProfile(profile.id) })
                 }
+                ForEach($draft.rdpProfiles) { $profile in
+                    RDPProfileSection(
+                        draft: $profile,
+                        addresses: draft.addresses,
+                        isDefault: draft.machine.defaultProfileID == profile.id,
+                        onMakeDefault: { draft.machine.defaultProfileID = profile.id },
+                        onRemove: { draft.removeProfile(profile.id) })
+                }
                 Section {
                     Button { draft.addProfile() } label: {
                         Label("Add SSH Profile", systemImage: "plus")
                     }
                     Button { draft.addVNCProfile() } label: {
                         Label("Add VNC Profile", systemImage: "plus")
+                    }
+                    Button { draft.addRDPProfile() } label: {
+                        Label("Add RDP Profile", systemImage: "plus")
                     }
                 }
             }
@@ -306,6 +317,72 @@ private struct VNCProfileSection: View {
         Binding(
             get: { draft.profile.username ?? "" },
             set: { draft.profile.username = $0.isEmpty ? nil : $0 })
+    }
+}
+
+private struct RDPProfileSection: View {
+    @Binding var draft: RDPProfileDraft
+    let addresses: [MachineAddress]
+    let isDefault: Bool
+    let onMakeDefault: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        Section {
+            TextField("Profile name", text: $draft.profile.name, prompt: Text("RDP"))
+            TextField("Username", text: username, prompt: Text("Asked when connecting if empty"))
+            TextField("Domain", text: domain, prompt: Text("Optional; leave empty for a local account"))
+            TextField("Port", value: $draft.profile.port, format: .number.grouping(.never), prompt: Text("3389"))
+            Picker("Address", selection: $draft.profile.addressSelection) {
+                Text("Automatic (first reachable)").tag(AddressSelection.automatic)
+                ForEach(addresses) { address in
+                    Text("\(address.displayLabel) — \(address.host)").tag(AddressSelection.pinned(address.id))
+                }
+            }
+            SecretRow(
+                title: "Password",
+                prompt: "Optional; asked when connecting if empty",
+                hasStoredSecret: draft.hasStoredSecret,
+                enteredSecret: $draft.enteredSecret,
+                onRemoveStored: { draft.removeStoredSecret() })
+            // Clipboard sharing waits for cliprdr handlers in the bridge; the
+            // profile field exists but stays hidden until it does something.
+        } header: {
+            HStack(spacing: 8) {
+                Label(draft.profile.name.isEmpty ? "RDP Profile" : draft.profile.name, systemImage: ConnectionProtocol.rdp.symbolName)
+                if isDefault {
+                    Text("Default")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
+                } else {
+                    Button("Make Default", action: onMakeDefault)
+                        .controlSize(.small)
+                }
+                Spacer()
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Remove profile")
+            }
+        } footer: {
+            Text("Connects with Network Level Authentication over TLS. The server's certificate is shown for approval on first use.")
+        }
+    }
+
+    private var username: Binding<String> {
+        Binding(
+            get: { draft.profile.username ?? "" },
+            set: { draft.profile.username = $0.isEmpty ? nil : $0 })
+    }
+
+    private var domain: Binding<String> {
+        Binding(
+            get: { draft.profile.domain ?? "" },
+            set: { draft.profile.domain = $0.isEmpty ? nil : $0 })
     }
 }
 

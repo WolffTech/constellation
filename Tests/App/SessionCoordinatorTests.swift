@@ -2,8 +2,8 @@ import AppKit
 import ConstellationCore
 import ConstellationOpenSSH
 import ConstellationStorage
+import ConstellationRemoteDesktop
 import ConstellationTerminal
-import ConstellationVNC
 import Testing
 @testable import Constellation
 
@@ -219,7 +219,7 @@ struct SessionCoordinatorTests {
         _ = try await coordinator.open(profileID: profile.id)
         let session = try #require(vncDriver.sessions.last)
 
-        session.emit(.stateChanged(.disconnected(VNCSessionFailure(message: "Authentication failed.", isAuthenticationFailure: true))))
+        session.emit(.stateChanged(.disconnected(RemoteDesktopSessionFailure(message: "Authentication failed.", isAuthenticationFailure: true))))
 
         #expect(coordinator.sessions.first?.state == .failed(.authenticationFailed("Authentication failed.")))
         #expect(coordinator.sessions.first?.state.hasLiveProcess == false)
@@ -248,6 +248,68 @@ struct SessionCoordinatorTests {
         _ = try await coordinator.open(profileID: profile.id)
 
         #expect(coordinator.sessions.first?.state == .failed(.unsupportedProtocol(.vnc)))
+    }
+
+    @Test func rdpProfilesConnectThroughTheirOwnDriver() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let machine = Machine(name: "win")
+        let address = MachineAddress(machineID: machine.id, label: "", host: "win.box")
+        let credential = CredentialReference(label: "win · RDP RDP password", kind: .password)
+        let profile = RDPProfile(machineID: machine.id, username: "nick", domain: "CORP", port: 3390, credentialID: credential.id, sharesClipboard: true)
+        try await library.save(.batch([
+            .upsertMachine(machine), .upsertAddress(address), .upsertCredential(credential), .upsertProfile(.rdp(profile)),
+        ]))
+        let rdpDriver = StubRDPDriver()
+        let coordinator = SessionCoordinator(
+            library: library,
+            prober: StubProber(results: ["win.box": true]),
+            driver: StubSSHDriver(),
+            rdpDriver: rdpDriver)
+
+        let id = try await coordinator.open(profileID: profile.id)
+
+        #expect(rdpDriver.requests.last == RDPSessionRequest(
+            host: "win.box", port: 3390, username: "nick", domain: "CORP", credentialID: credential.id, sharesClipboard: true, machineName: "win"))
+        let session = try #require(rdpDriver.sessions.last)
+        #expect(session.connectCalls == 1)
+        #expect(coordinator.isRemoteDesktop(id))
+        #expect(coordinator.sessions.first?.protocolKind == .rdp)
+        session.emit(.stateChanged(.connected))
+        #expect(coordinator.sessions.first?.state.isConnected == true)
+        session.emit(.stateChanged(.disconnected(RemoteDesktopSessionFailure(message: "Authentication failed.", isAuthenticationFailure: true))))
+        #expect(coordinator.sessions.first?.state == .failed(.authenticationFailed("Authentication failed.")))
+    }
+
+    @Test func cancellingTheRDPCredentialPromptLeavesTheTabDisconnected() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let machine = Machine(name: "win")
+        let address = MachineAddress(machineID: machine.id, label: "", host: "win.box")
+        let profile = RDPProfile(machineID: machine.id)
+        try await library.save(.batch([.upsertMachine(machine), .upsertAddress(address), .upsertProfile(.rdp(profile))]))
+        let rdpDriver = StubRDPDriver(cancels: true)
+        let coordinator = SessionCoordinator(
+            library: library,
+            prober: StubProber(results: ["win.box": true]),
+            driver: StubSSHDriver(),
+            rdpDriver: rdpDriver)
+
+        _ = try await coordinator.open(profileID: profile.id)
+
+        #expect(coordinator.sessions.first?.state == .disconnected)
+        #expect(rdpDriver.sessions.isEmpty)
+    }
+
+    @Test func rdpWithoutADriverFailsClearly() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let machine = Machine(name: "win")
+        let address = MachineAddress(machineID: machine.id, label: "", host: "win.box")
+        let profile = RDPProfile(machineID: machine.id)
+        try await library.save(.batch([.upsertMachine(machine), .upsertAddress(address), .upsertProfile(.rdp(profile))]))
+        let coordinator = SessionCoordinator(library: library, prober: StubProber(results: ["win.box": true]), driver: StubSSHDriver())
+
+        _ = try await coordinator.open(profileID: profile.id)
+
+        #expect(coordinator.sessions.first?.state == .failed(.unsupportedProtocol(.rdp)))
     }
 
     private func coordinatorWithVNCMachine() async throws -> (SessionCoordinator, GRDBMachineLibrary, Machine, StubVNCDriver) {
@@ -359,12 +421,31 @@ private final class StubVNCDriver: VNCSessionDriving {
 }
 
 @MainActor
+private final class StubRDPDriver: RDPSessionDriving {
+    private let cancels: Bool
+    private(set) var requests: [RDPSessionRequest] = []
+    private(set) var sessions: [StubRemoteDesktopSession] = []
+
+    init(cancels: Bool = false) {
+        self.cancels = cancels
+    }
+
+    func start(_ request: RDPSessionRequest) throws -> any RemoteDesktopSession {
+        requests.append(request)
+        if cancels { throw RDPSessionDriverError.cancelled }
+        let session = StubRemoteDesktopSession()
+        sessions.append(session)
+        return session
+    }
+}
+
+@MainActor
 private final class StubRemoteDesktopSession: RemoteDesktopSession {
     let view = NSView()
-    private(set) var state: VNCSessionState = .idle
+    private(set) var state: RemoteDesktopSessionState = .idle
     var framebufferSize: CGSize?
     var displayMode: RemoteDesktopDisplayMode = .fit
-    var eventHandler: (@MainActor (VNCSessionEvent) -> Void)?
+    var eventHandler: (@MainActor (RemoteDesktopSessionEvent) -> Void)?
     private(set) var connectCalls = 0
     private(set) var disconnectCalls = 0
 
@@ -376,7 +457,7 @@ private final class StubRemoteDesktopSession: RemoteDesktopSession {
     func disconnect() { disconnectCalls += 1 }
     func focus() {}
 
-    func emit(_ event: VNCSessionEvent) {
+    func emit(_ event: RemoteDesktopSessionEvent) {
         if case .stateChanged(let newState) = event { state = newState }
         eventHandler?(event)
     }

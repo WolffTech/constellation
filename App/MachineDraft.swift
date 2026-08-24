@@ -15,6 +15,7 @@ struct MachineDraft: Equatable {
     var addresses: [MachineAddress]
     var profiles: [SSHProfileDraft]
     var vncProfiles: [VNCProfileDraft]
+    var rdpProfiles: [RDPProfileDraft]
     var removedAddressIDs: Set<AddressID> = []
     var removedProfileIDs: Set<ProfileID> = []
     var removedCredentialIDs: Set<CredentialID> = []
@@ -27,6 +28,7 @@ struct MachineDraft: Equatable {
         addresses = [MachineAddress(machineID: machine.id, label: "", host: "")]
         profiles = [SSHProfileDraft(profile: SSHProfile(machineID: machine.id))]
         vncProfiles = []
+        rdpProfiles = []
         isNew = true
     }
 
@@ -42,6 +44,10 @@ struct MachineDraft: Equatable {
             guard case .vnc(let vnc) = profile else { return nil }
             return VNCProfileDraft(profile: vnc, credential: vnc.credentialID.flatMap(snapshot.credential))
         }
+        rdpProfiles = snapshot.profiles(for: machine.id).compactMap { profile in
+            guard case .rdp(let rdp) = profile else { return nil }
+            return RDPProfileDraft(profile: rdp, credential: rdp.credentialID.flatMap(snapshot.credential))
+        }
         isNew = false
     }
 
@@ -56,11 +62,16 @@ struct MachineDraft: Equatable {
                   let id = draft.profile.credentialID else { return nil }
             return PendingSecret(credentialID: id, secret: Secret(secret))
         }
-        return ssh + vnc
+        let rdp = rdpProfiles.compactMap { draft -> PendingSecret? in
+            guard let secret = draft.enteredSecret, !secret.isEmpty,
+                  let id = draft.profile.credentialID else { return nil }
+            return PendingSecret(credentialID: id, secret: Secret(secret))
+        }
+        return ssh + vnc + rdp
     }
 
-    /// Every profile id in editor order, SSH first.
-    var profileIDs: [ProfileID] { profiles.map(\.id) + vncProfiles.map(\.id) }
+    /// Every profile id in editor order: SSH, then VNC, then RDP.
+    var profileIDs: [ProfileID] { profiles.map(\.id) + vncProfiles.map(\.id) + rdpProfiles.map(\.id) }
 
     mutating func addAddress() {
         addresses.append(MachineAddress(machineID: machine.id, label: "", host: "", priority: addresses.count))
@@ -84,6 +95,12 @@ struct MachineDraft: Equatable {
             name: vncProfiles.isEmpty ? "VNC" : "VNC \(vncProfiles.count + 1)")))
     }
 
+    mutating func addRDPProfile() {
+        rdpProfiles.append(RDPProfileDraft(profile: RDPProfile(
+            machineID: machine.id,
+            name: rdpProfiles.isEmpty ? "RDP" : "RDP \(rdpProfiles.count + 1)")))
+    }
+
     mutating func removeProfile(_ id: ProfileID) {
         if let index = profiles.firstIndex(where: { $0.profile.id == id }) {
             if let credential = profiles[index].profile.credentialID { removedCredentialIDs.insert(credential) }
@@ -91,6 +108,9 @@ struct MachineDraft: Equatable {
         } else if let index = vncProfiles.firstIndex(where: { $0.profile.id == id }) {
             if let credential = vncProfiles[index].profile.credentialID { removedCredentialIDs.insert(credential) }
             vncProfiles.remove(at: index)
+        } else if let index = rdpProfiles.firstIndex(where: { $0.profile.id == id }) {
+            if let credential = rdpProfiles[index].profile.credentialID { removedCredentialIDs.insert(credential) }
+            rdpProfiles.remove(at: index)
         } else {
             return
         }
@@ -128,8 +148,18 @@ struct MachineDraft: Equatable {
             }
             changes.append(.upsertProfile(.vnc(profile)))
         }
+        for draft in rdpProfiles {
+            let profile = draft.resolvedProfile()
+            if let credential = draft.resolvedCredential(machineName: machine.name) {
+                changes.append(.upsertCredential(credential))
+            }
+            changes.append(.upsertProfile(.rdp(profile)))
+        }
         changes += removedProfileIDs.map { .deleteProfile($0) }
-        let keptCredentials = Set(profiles.compactMap(\.profile.credentialID) + vncProfiles.compactMap(\.profile.credentialID))
+        let keptCredentials = Set(
+            profiles.compactMap(\.profile.credentialID)
+                + vncProfiles.compactMap(\.profile.credentialID)
+                + rdpProfiles.compactMap(\.profile.credentialID))
         changes += removedCredentialIDs.subtracting(keptCredentials).map { .deleteCredential($0) }
 
         let change = MachineLibraryChange.batch(changes)
@@ -265,5 +295,50 @@ struct VNCProfileDraft: Identifiable, Equatable {
     func resolvedCredential(machineName: String) -> CredentialReference? {
         guard enteredSecret?.isEmpty == false, let id = resolvedProfile().credentialID else { return nil }
         return CredentialReference(id: id, label: "\(machineName) · \(resolvedProfile().name) VNC password", kind: .password)
+    }
+}
+
+/// One RDP profile under edit. Username and domain are optional: NLA needs
+/// them, so whatever is missing is asked for at connect time.
+struct RDPProfileDraft: Identifiable, Equatable {
+    var profile: RDPProfile
+    var enteredSecret: String? {
+        didSet {
+            if let entered = enteredSecret, !entered.isEmpty, profile.credentialID == nil {
+                profile.credentialID = CredentialID()
+            }
+        }
+    }
+    var existingCredentialLabel: String?
+    var id: ProfileID { profile.id }
+
+    init(profile: RDPProfile, credential: CredentialReference? = nil) {
+        self.profile = profile
+        existingCredentialLabel = credential?.label
+    }
+
+    var hasStoredSecret: Bool { existingCredentialLabel != nil && profile.credentialID != nil }
+
+    mutating func removeStoredSecret() {
+        profile.credentialID = nil
+        existingCredentialLabel = nil
+        enteredSecret = nil
+    }
+
+    func resolvedProfile() -> RDPProfile {
+        var profile = self.profile
+        profile.name = profile.name.trimmingCharacters(in: .whitespaces)
+        profile.username = profile.username?.trimmingCharacters(in: .whitespaces)
+        if profile.username?.isEmpty == true { profile.username = nil }
+        profile.domain = profile.domain?.trimmingCharacters(in: .whitespaces)
+        if profile.domain?.isEmpty == true { profile.domain = nil }
+        let hasSecret = hasStoredSecret || enteredSecret?.isEmpty == false
+        if !hasSecret { profile.credentialID = nil }
+        return profile
+    }
+
+    func resolvedCredential(machineName: String) -> CredentialReference? {
+        guard enteredSecret?.isEmpty == false, let id = resolvedProfile().credentialID else { return nil }
+        return CredentialReference(id: id, label: "\(machineName) · \(resolvedProfile().name) RDP password", kind: .password)
     }
 }

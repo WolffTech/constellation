@@ -1,5 +1,5 @@
 import AppKit
-import ConstellationVNC
+import ConstellationRemoteDesktop
 import SwiftUI
 
 @main

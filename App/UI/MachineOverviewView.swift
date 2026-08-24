@@ -1,7 +1,7 @@
 import AppKit
 import ConstellationCore
 import ConstellationTerminal
-import ConstellationVNC
+import ConstellationRemoteDesktop
 import SwiftUI
 
 struct WorkspaceDetailView: View {
@@ -187,7 +187,7 @@ private struct SessionActions: View {
 
     /// VNC sessions only, once an address has been resolved.
     private var screenSharingURL: URL? {
-        guard sessions.isRemoteDesktop(summary.id), let endpoint = summary.endpoint else { return nil }
+        guard summary.protocolKind == .vnc, let endpoint = summary.endpoint else { return nil }
         return endpoint.screenSharingURL(username: summary.username)
     }
 
@@ -420,6 +420,10 @@ struct MachineOverviewView: View {
         if case .vnc(let vnc) = profile {
             parts.append("unencrypted")
             if vnc.sharesClipboard { parts.append("clipboard shared") }
+        }
+        if case .rdp(let rdp) = profile {
+            if let domain = rdp.domain, !domain.isEmpty { parts.append("domain \(domain)") }
+            if rdp.sharesClipboard { parts.append("clipboard shared") }
         }
         switch profile.addressSelection {
         case .automatic:

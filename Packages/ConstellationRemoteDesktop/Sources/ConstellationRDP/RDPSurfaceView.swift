@@ -1,10 +1,16 @@
 import AppKit
 import CConstellationRDP
 import CoreGraphics
+import QuartzCore
 
 /// Draws the BGRX frame buffer the C bridge owns and forwards keyboard and
-/// pointer input back to it. The buffer is not copied: a `CGImage` references
-/// it directly and is refreshed whenever the bridge reports an update.
+/// pointer input back to it.
+///
+/// The bridge writes the buffer on FreeRDP's client thread, so the view never
+/// hands that live memory to Core Animation. Instead a display link coalesces
+/// updates to the screen refresh and, when dirty, copies the buffer into an
+/// immutable snapshot for the layer — one rebuild per frame at most, and no
+/// tearing from CA reading memory mid-write.
 @MainActor
 final class RDPSurfaceView: NSView {
     /// Sends translated input to the live session. Set by `RDPSession`.
@@ -15,6 +21,8 @@ final class RDPSurfaceView: NSView {
     private var stride = 0
     private let colorSpace = CGColorSpaceCreateDeviceRGB()
     private var previousModifiers: NSEvent.ModifierFlags = []
+    private var displayLink: CADisplayLink?
+    private var needsSnapshot = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -30,29 +38,59 @@ final class RDPSurfaceView: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { startDisplayLink() } else { stopDisplayLink() }
+    }
+
     /// Points at a freshly allocated frame buffer. The pointer must stay valid
     /// until the next call or `clear()`.
     func setFrameBuffer(_ pointer: UnsafePointer<UInt8>, width: Int, height: Int, stride: Int) {
         buffer = pointer
         bufferSize = CGSize(width: width, height: height)
         self.stride = stride
-        refreshImage()
+        needsSnapshot = true
     }
 
     func clear() {
         buffer = nil
         bufferSize = .zero
+        needsSnapshot = false
         layer?.contents = nil
     }
 
-    func markDirty() { refreshImage() }
+    func markDirty() { needsSnapshot = true }
 
     var framebufferSize: CGSize? { bufferSize == .zero ? nil : bufferSize }
 
+    // MARK: Display link
+
+    private func startDisplayLink() {
+        guard displayLink == nil else { return }
+        let link = displayLink(target: self, selector: #selector(displayLinkFired))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func stopDisplayLink() {
+        displayLink?.invalidate()
+        displayLink = nil
+    }
+
+    @objc private func displayLinkFired(_ link: CADisplayLink) {
+        guard needsSnapshot else { return }
+        needsSnapshot = false
+        refreshImage()
+    }
+
+    /// Copies the current frame buffer into an immutable image. The copy makes
+    /// the snapshot safe for Core Animation to read while the client thread
+    /// keeps writing the live buffer.
     private func refreshImage() {
         guard let buffer, bufferSize != .zero else { return }
         let length = stride * Int(bufferSize.height)
-        guard let provider = CGDataProvider(dataInfo: nil, data: buffer, size: length, releaseData: { _, _, _ in }) else {
+        guard let data = CFDataCreate(nil, buffer, length),
+              let provider = CGDataProvider(data: data) else {
             return
         }
         // BGRX in memory: little-endian 32-bit with the alpha byte ignored.

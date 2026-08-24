@@ -152,4 +152,41 @@ struct MachineDraftTests {
         #expect(draft.removedProfileIDs == [vnc.id])
         #expect(draft.removedCredentialIDs == [credential.id])
     }
+
+    @Test func rdpProfilesRoundTripWithDomainAndPassword() throws {
+        var draft = MachineDraft(newMachine: "win")
+        draft.addresses[0].host = "10.0.0.7"
+        draft.addRDPProfile()
+        draft.rdpProfiles[0].profile.username = "nick "
+        draft.rdpProfiles[0].profile.domain = " CORP"
+        draft.rdpProfiles[0].enteredSecret = "pa55"
+
+        guard case .batch(let changes) = try draft.change() else {
+            Issue.record("expected a batch")
+            return
+        }
+        let saved = try #require(changes.compactMap { if case .upsertProfile(.rdp(let p)) = $0 { p } else { nil } }.first)
+        let credential = try #require(changes.compactMap { if case .upsertCredential(let c) = $0 { c } else { nil } }.first)
+        #expect(saved.username == "nick")
+        #expect(saved.domain == "CORP")
+        #expect(saved.credentialID == credential.id)
+        #expect(credential.label == "win · RDP RDP password")
+        #expect(draft.pendingSecrets.map(\.credentialID) == [credential.id])
+        #expect(draft.profileIDs == [draft.profiles[0].id, saved.id])
+    }
+
+    @Test func removingAnRDPProfileForgetsItsCredential() {
+        let machine = Machine(name: "win")
+        let credential = CredentialReference(label: "x", kind: .password)
+        let rdp = RDPProfile(machineID: machine.id, credentialID: credential.id)
+        let snapshot = MachineLibrarySnapshot(machines: [machine], addresses: [], profiles: [.rdp(rdp)], credentials: [credential])
+        var draft = MachineDraft(editing: machine, in: snapshot)
+        #expect(draft.rdpProfiles[0].hasStoredSecret)
+
+        draft.removeProfile(rdp.id)
+
+        #expect(draft.rdpProfiles.isEmpty)
+        #expect(draft.removedProfileIDs == [rdp.id])
+        #expect(draft.removedCredentialIDs == [credential.id])
+    }
 }

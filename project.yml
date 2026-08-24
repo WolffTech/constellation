@@ -45,7 +45,11 @@ targets:
         product: constellation-askpass
         link: false
       - package: ConstellationRemoteDesktop
+        product: ConstellationRemoteDesktop
+      - package: ConstellationRemoteDesktop
         product: ConstellationVNC
+      - package: ConstellationRemoteDesktop
+        product: ConstellationRDP
     # ssh runs the helper as a separate process, so it ships beside the app binary.
     postBuildScripts:
       - name: Embed constellation-askpass

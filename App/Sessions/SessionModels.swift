@@ -1,5 +1,5 @@
 import ConstellationCore
-import ConstellationVNC
+import ConstellationRemoteDesktop
 import Foundation
 
 enum SessionTarget: Hashable, Sendable {

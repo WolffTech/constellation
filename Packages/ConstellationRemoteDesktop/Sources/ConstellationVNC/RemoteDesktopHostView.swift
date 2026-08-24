@@ -1,4 +1,5 @@
 import AppKit
+import ConstellationRemoteDesktop
 import RoyalVNCKit
 
 /// Hosts the framebuffer view in a scroll view and applies the display mode.

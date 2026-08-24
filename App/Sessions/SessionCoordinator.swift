@@ -1,8 +1,8 @@
 import AppKit
 import ConstellationCore
 import ConstellationOpenSSH
+import ConstellationRemoteDesktop
 import ConstellationTerminal
-import ConstellationVNC
 import Foundation
 import Observation
 
@@ -43,6 +43,7 @@ final class SessionCoordinator {
     private let prober: any AddressProbing
     private let driver: any SSHSessionDriving
     private let vncDriver: (any VNCSessionDriving)?
+    private let rdpDriver: (any RDPSessionDriving)?
     private var handles: [SessionID: LiveSession] = [:]
     private var attempts: [SessionID: UUID] = [:]
     private var reportedExitStatuses: [SessionID: Int32] = [:]
@@ -53,12 +54,14 @@ final class SessionCoordinator {
         library: any MachineLibrary,
         prober: any AddressProbing,
         driver: any SSHSessionDriving,
-        vncDriver: (any VNCSessionDriving)? = nil
+        vncDriver: (any VNCSessionDriving)? = nil,
+        rdpDriver: (any RDPSessionDriving)? = nil
     ) {
         self.library = library
         self.prober = prober
         self.driver = driver
         self.vncDriver = vncDriver
+        self.rdpDriver = rdpDriver
     }
 
     var selectedSession: SessionSummary? {
@@ -79,7 +82,10 @@ final class SessionCoordinator {
     }
 
     func isRemoteDesktop(_ id: SessionID) -> Bool {
-        sessions.first { $0.id == id }?.protocolKind == .vnc
+        switch sessions.first(where: { $0.id == id })?.protocolKind {
+        case .vnc, .rdp: true
+        case .ssh, .appleScreenSharing, nil: false
+        }
     }
 
     /// Connected sessions for a machine.
@@ -376,7 +382,8 @@ final class SessionCoordinator {
             switch profile {
             case .ssh(let ssh): port = ssh.port
             case .vnc(let vnc): port = vnc.port
-            case .rdp, .appleScreenSharing:
+            case .rdp(let rdp): port = rdp.port
+            case .appleScreenSharing:
                 fail(sessionID, attempt: attempt, with: .unsupportedProtocol(profile.protocolKind))
                 return
             }
@@ -410,7 +417,19 @@ final class SessionCoordinator {
                         machineName: summary.machineName ?? summary.title),
                     for: sessionID,
                     attempt: attempt)
-            case .rdp, .appleScreenSharing:
+            case .rdp(let rdp):
+                startRDP(
+                    RDPSessionRequest(
+                        host: address.host,
+                        port: rdp.port,
+                        username: rdp.username,
+                        domain: rdp.domain,
+                        credentialID: rdp.credentialID,
+                        sharesClipboard: rdp.sharesClipboard,
+                        machineName: summary.machineName ?? summary.title),
+                    for: sessionID,
+                    attempt: attempt)
+            case .appleScreenSharing:
                 return
             }
         }
@@ -467,23 +486,49 @@ final class SessionCoordinator {
     }
 
     private func startVNC(_ request: VNCSessionRequest, for sessionID: SessionID, attempt: UUID) {
-        guard attempts[sessionID] == attempt else { return }
         guard let vncDriver else {
             fail(sessionID, attempt: attempt, with: .unsupportedProtocol(.vnc))
             return
         }
+        startRemoteDesktop(host: request.host, port: request.port, for: sessionID, attempt: attempt) {
+            try vncDriver.start(request)
+        }
+    }
+
+    private func startRDP(_ request: RDPSessionRequest, for sessionID: SessionID, attempt: UUID) {
+        guard let rdpDriver else {
+            fail(sessionID, attempt: attempt, with: .unsupportedProtocol(.rdp))
+            return
+        }
+        startRemoteDesktop(host: request.host, port: request.port, for: sessionID, attempt: attempt) {
+            try rdpDriver.start(request)
+        }
+    }
+
+    /// Shared tail of every remote desktop start: the driver may prompt (and
+    /// throw on cancel) before the session exists.
+    private func startRemoteDesktop(
+        host: String,
+        port: Int,
+        for sessionID: SessionID,
+        attempt: UUID,
+        make: () throws -> any RemoteDesktopSession
+    ) {
+        guard attempts[sessionID] == attempt else { return }
         do {
-            let session = try vncDriver.start(request)
+            let session = try make()
             guard attempts[sessionID] == attempt,
                   sessions.contains(where: { $0.id == sessionID }) else { return }
             let mode = sessions.first(where: { $0.id == sessionID })?.displayMode ?? .fit
             session.displayMode = mode
             handles[sessionID] = .remoteDesktop(session)
-            let facts = ConnectionFacts(host: request.host, port: request.port, connectedAt: Date())
+            let facts = ConnectionFacts(host: host, port: port, connectedAt: Date())
             session.eventHandler = { [weak self] event in
                 self?.handle(event, facts: facts, for: sessionID)
             }
             session.connect()
+        } catch RDPSessionDriverError.cancelled {
+            update(sessionID) { $0.state = .disconnected }
         } catch {
             fail(sessionID, attempt: attempt, with: .launchFailed(error.localizedDescription))
         }
@@ -529,7 +574,7 @@ final class SessionCoordinator {
         }
     }
 
-    private func handle(_ event: VNCSessionEvent, facts: ConnectionFacts, for sessionID: SessionID) {
+    private func handle(_ event: RemoteDesktopSessionEvent, facts: ConnectionFacts, for sessionID: SessionID) {
         guard case .remoteDesktop = handles[sessionID] else { return }
         switch event {
         case .stateChanged(let state):

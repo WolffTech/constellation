@@ -1,5 +1,6 @@
 import AppKit
 import ConstellationCore
+import ConstellationRemoteDesktop
 import ConstellationVNC
 import Foundation
 
