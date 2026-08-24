@@ -95,12 +95,25 @@ public final class AskPassService {
             if let id = request.credentialID, let secret = secrets.secret(for: id) {
                 return .secret(secret)
             }
-            return userPrompt(request)
+            return retiringOnDenial(userPrompt(request), token: request.token)
         case .confirm:
-            return userPrompt(request)
+            return retiringOnDenial(userPrompt(request), token: request.token)
         case .none:
             return .confirmed(true)
         }
+    }
+
+    /// A cancelled prompt ends the launch: ssh retries the helper up to
+    /// `NumberOfPasswordPrompts` times, and each retry would otherwise show the
+    /// same dialog again.
+    private func retiringOnDenial(_ response: AskPass.Response, token: String) -> AskPass.Response {
+        switch response {
+        case .denied, .confirmed(false):
+            liveTokens.remove(token)
+        case .secret, .confirmed(true):
+            break
+        }
+        return response
     }
 }
 
