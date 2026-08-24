@@ -105,4 +105,32 @@ struct GRDBMachineLibraryTests {
         let reopened = try GRDBMachineLibrary(path: path)
         #expect(try await reopened.snapshot().machines == [machine])
     }
+
+    @Test func replacesAndRestoresWorkspaceTabsInOrder() async throws {
+        let (library, machine, _, _, profile) = try await seeded()
+        let first = WorkspaceTab(
+            id: SessionID(), machineID: machine.id, profileID: profile.id,
+            title: "first", position: 1)
+        let second = WorkspaceTab(
+            id: SessionID(), machineID: machine.id, profileID: profile.id,
+            title: "second", position: 0, isSelected: true)
+
+        try await library.save(.replaceWorkspace([first, second]))
+
+        #expect(try await library.snapshot().workspaceTabs == [second, first])
+        try await library.save(.replaceWorkspace([]))
+        #expect(try await library.snapshot().workspaceTabs.isEmpty)
+    }
+
+    @Test func deletingAProfileRemovesItsWorkspaceTabs() async throws {
+        let (library, machine, _, _, profile) = try await seeded()
+        let tab = WorkspaceTab(
+            id: SessionID(), machineID: machine.id, profileID: profile.id,
+            title: "SSH", position: 0)
+        try await library.save(.replaceWorkspace([tab]))
+
+        try await library.save(.deleteProfile(profile.id))
+
+        #expect(try await library.snapshot().workspaceTabs.isEmpty)
+    }
 }

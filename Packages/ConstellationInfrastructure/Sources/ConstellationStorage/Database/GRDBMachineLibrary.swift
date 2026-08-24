@@ -69,6 +69,16 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
                 t.column("settings_json", .text).notNull()
             }
         }
+        migrator.registerMigration("v2-workspace-tabs") { db in
+            try db.create(table: "workspace_tabs") { t in
+                t.primaryKey("id", .text)
+                t.column("machine_id", .text).notNull().references("machines", onDelete: .cascade)
+                t.column("profile_id", .text).notNull().references("connection_profiles", onDelete: .cascade)
+                t.column("title", .text).notNull()
+                t.column("position", .integer).notNull().unique()
+                t.column("is_selected", .boolean).notNull().defaults(to: false)
+            }
+        }
         return migrator
     }
 
@@ -156,7 +166,22 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
             return reconcile(profile, addressIDs: addressIDs, credentialIDs: credentialIDs)
         }
 
-        return MachineLibrarySnapshot(machines: machines, addresses: addresses, profiles: profiles, credentials: credentials)
+        let workspaceTabs = try Row.fetchAll(db, sql: "SELECT * FROM workspace_tabs ORDER BY position").map { row in
+            WorkspaceTab(
+                id: try id(SessionID.self, row["id"], table: "workspace_tabs"),
+                machineID: try id(MachineID.self, row["machine_id"], table: "workspace_tabs"),
+                profileID: try id(ProfileID.self, row["profile_id"], table: "workspace_tabs"),
+                title: row["title"],
+                position: row["position"],
+                isSelected: row["is_selected"])
+        }
+
+        return MachineLibrarySnapshot(
+            machines: machines,
+            addresses: addresses,
+            profiles: profiles,
+            credentials: credentials,
+            workspaceTabs: workspaceTabs)
     }
 
     private static func reconcile(_ profile: ConnectionProfile, addressIDs: Set<AddressID>, credentialIDs: Set<CredentialID>) -> ConnectionProfile {
@@ -238,6 +263,18 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
         case .deleteCredential(let id):
             try db.execute(sql: "DELETE FROM credential_references WHERE id = ?", arguments: [id.description])
 
+        case .replaceWorkspace(let tabs):
+            try db.execute(sql: "DELETE FROM workspace_tabs")
+            for tab in tabs.sorted(by: { $0.position < $1.position }) {
+                try db.execute(sql: """
+                    INSERT INTO workspace_tabs (id, machine_id, profile_id, title, position, is_selected)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """, arguments: [
+                        tab.id.description, tab.machineID.description, tab.profileID.description,
+                        tab.title, tab.position, tab.isSelected,
+                    ])
+            }
+
         case .batch(let changes):
             for change in changes { try apply(change, db) }
         }
@@ -248,6 +285,7 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
         case .upsertAddress(let address): address.machineID
         case .upsertProfile(let profile): profile.machineID
         case .batch(let changes): changes.lazy.compactMap(machineID(in:)).first
+        case .replaceWorkspace(let tabs): tabs.first?.machineID
         default: nil
         }
     }
