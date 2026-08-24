@@ -3,6 +3,7 @@ import ConstellationCore
 import ConstellationOpenSSH
 import ConstellationStorage
 import ConstellationTerminal
+import ConstellationVNC
 import Testing
 @testable import Constellation
 
@@ -185,6 +186,85 @@ struct SessionCoordinatorTests {
         #expect(driver.requests.first?.destination.user == "b")
     }
 
+    @Test func vncProfilesConnectThroughTheRemoteDesktopDriver() async throws {
+        let (coordinator, library, machine, vncDriver) = try await coordinatorWithVNCMachine()
+        let profile = try #require(await library.snapshot().profiles(for: machine.id).first)
+
+        let id = try await coordinator.open(profileID: profile.id)
+
+        let session = try #require(vncDriver.sessions.last)
+        #expect(vncDriver.requests.last == VNCSessionRequest(
+            host: "vnc.box", port: 5901, username: "nick", credentialID: nil, sharesClipboard: true, machineName: "screen"))
+        #expect(session.connectCalls == 1)
+        #expect(coordinator.remoteDesktop(for: id) != nil)
+        #expect(coordinator.terminal(for: id) == nil)
+        #expect(coordinator.sessions.first?.endpoint == SessionEndpoint(host: "vnc.box", port: 5901))
+        #expect(coordinator.sessions.first?.protocolKind == .vnc)
+
+        session.emit(.stateChanged(.connected))
+        #expect(coordinator.sessions.first?.state.isConnected == true)
+        #expect(coordinator.count(forProfile: profile.id) == 1)
+
+        coordinator.disconnect(sessionID: id)
+        #expect(coordinator.sessions.first?.state == .disconnecting)
+        #expect(session.disconnectCalls == 1)
+        session.emit(.stateChanged(.disconnected(nil)))
+        #expect(coordinator.sessions.first?.state == .disconnected)
+        #expect(coordinator.remoteDesktop(for: id) == nil)
+    }
+
+    @Test func vncAuthenticationFailuresAreReportedAsSuch() async throws {
+        let (coordinator, library, machine, vncDriver) = try await coordinatorWithVNCMachine()
+        let profile = try #require(await library.snapshot().profiles(for: machine.id).first)
+        _ = try await coordinator.open(profileID: profile.id)
+        let session = try #require(vncDriver.sessions.last)
+
+        session.emit(.stateChanged(.disconnected(VNCSessionFailure(message: "Authentication failed.", isAuthenticationFailure: true))))
+
+        #expect(coordinator.sessions.first?.state == .failed(.authenticationFailed("Authentication failed.")))
+        #expect(coordinator.sessions.first?.state.hasLiveProcess == false)
+    }
+
+    @Test func displayModeReachesTheRemoteDesktop() async throws {
+        let (coordinator, library, machine, vncDriver) = try await coordinatorWithVNCMachine()
+        let profile = try #require(await library.snapshot().profiles(for: machine.id).first)
+        let id = try await coordinator.open(profileID: profile.id)
+        let session = try #require(vncDriver.sessions.last)
+
+        coordinator.setDisplayMode(.actualSize, for: id)
+
+        #expect(session.displayMode == .actualSize)
+        #expect(coordinator.sessions.first?.displayMode == .actualSize)
+    }
+
+    @Test func vncWithoutADriverFailsClearly() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let machine = Machine(name: "screen")
+        let address = MachineAddress(machineID: machine.id, label: "", host: "vnc.box")
+        let profile = VNCProfile(machineID: machine.id)
+        try await library.save(.batch([.upsertMachine(machine), .upsertAddress(address), .upsertProfile(.vnc(profile))]))
+        let coordinator = SessionCoordinator(library: library, prober: StubProber(results: ["vnc.box": true]), driver: StubSSHDriver())
+
+        _ = try await coordinator.open(profileID: profile.id)
+
+        #expect(coordinator.sessions.first?.state == .failed(.unsupportedProtocol(.vnc)))
+    }
+
+    private func coordinatorWithVNCMachine() async throws -> (SessionCoordinator, GRDBMachineLibrary, Machine, StubVNCDriver) {
+        let library = try GRDBMachineLibrary.inMemory()
+        let machine = Machine(name: "screen")
+        let address = MachineAddress(machineID: machine.id, label: "", host: "vnc.box")
+        let profile = VNCProfile(machineID: machine.id, username: "nick", port: 5901, sharesClipboard: true)
+        try await library.save(.batch([.upsertMachine(machine), .upsertAddress(address), .upsertProfile(.vnc(profile))]))
+        let vncDriver = StubVNCDriver()
+        let coordinator = SessionCoordinator(
+            library: library,
+            prober: StubProber(results: ["vnc.box": true]),
+            driver: StubSSHDriver(),
+            vncDriver: vncDriver)
+        return (coordinator, library, machine, vncDriver)
+    }
+
     private func coordinatorWithOneMachine() async throws -> (SessionCoordinator, GRDBMachineLibrary, SSHProfile, StubSSHDriver) {
         let library = try GRDBMachineLibrary.inMemory()
         let machine = Machine(name: "box")
@@ -263,4 +343,41 @@ private final class StubTerminal: TerminalSession {
     func performBinding(_ action: String) -> Bool { true }
     func close() { isClosed = true }
     func emit(_ event: TerminalEvent) { eventHandler?(event) }
+}
+
+@MainActor
+private final class StubVNCDriver: VNCSessionDriving {
+    private(set) var requests: [VNCSessionRequest] = []
+    private(set) var sessions: [StubRemoteDesktopSession] = []
+
+    func start(_ request: VNCSessionRequest) throws -> any RemoteDesktopSession {
+        requests.append(request)
+        let session = StubRemoteDesktopSession()
+        sessions.append(session)
+        return session
+    }
+}
+
+@MainActor
+private final class StubRemoteDesktopSession: RemoteDesktopSession {
+    let view = NSView()
+    private(set) var state: VNCSessionState = .idle
+    var framebufferSize: CGSize?
+    var displayMode: RemoteDesktopDisplayMode = .fit
+    var eventHandler: (@MainActor (VNCSessionEvent) -> Void)?
+    private(set) var connectCalls = 0
+    private(set) var disconnectCalls = 0
+
+    func connect() {
+        connectCalls += 1
+        emit(.stateChanged(.connecting))
+    }
+
+    func disconnect() { disconnectCalls += 1 }
+    func focus() {}
+
+    func emit(_ event: VNCSessionEvent) {
+        if case .stateChanged(let newState) = event { state = newState }
+        eventHandler?(event)
+    }
 }

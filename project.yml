@@ -26,6 +26,8 @@ packages:
     path: Packages/ConstellationTerminal
   ConstellationInfrastructure:
     path: Packages/ConstellationInfrastructure
+  ConstellationRemoteDesktop:
+    path: Packages/ConstellationRemoteDesktop
 targets:
   Constellation:
     type: application
@@ -42,6 +44,8 @@ targets:
       - package: ConstellationInfrastructure
         product: constellation-askpass
         link: false
+      - package: ConstellationRemoteDesktop
+        product: ConstellationVNC
     # ssh runs the helper as a separate process, so it ships beside the app binary.
     postBuildScripts:
       - name: Embed constellation-askpass
@@ -117,3 +121,4 @@ schemes:
         - package: ConstellationTerminal/ConstellationTerminalTests
         - package: ConstellationInfrastructure/ConstellationStorageTests
         - package: ConstellationInfrastructure/ConstellationOpenSSHTests
+        - package: ConstellationRemoteDesktop/ConstellationVNCTests

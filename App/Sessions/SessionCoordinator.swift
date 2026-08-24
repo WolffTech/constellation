@@ -2,8 +2,33 @@ import AppKit
 import ConstellationCore
 import ConstellationOpenSSH
 import ConstellationTerminal
+import ConstellationVNC
 import Foundation
 import Observation
+
+/// A running driver session of either kind.
+@MainActor
+enum LiveSession {
+    case ssh(SSHDriverSession)
+    case remoteDesktop(any RemoteDesktopSession)
+
+    var terminal: (any TerminalSession)? {
+        if case .ssh(let handle) = self { handle.terminal } else { nil }
+    }
+
+    var remoteDesktop: (any RemoteDesktopSession)? {
+        if case .remoteDesktop(let session) = self { session } else { nil }
+    }
+
+    func close() {
+        switch self {
+        case .ssh(let handle): handle.close()
+        case .remoteDesktop(let session):
+            session.eventHandler = nil
+            session.disconnect()
+        }
+    }
+}
 
 @MainActor
 @Observable
@@ -17,7 +42,8 @@ final class SessionCoordinator {
     private let library: any MachineLibrary
     private let prober: any AddressProbing
     private let driver: any SSHSessionDriving
-    private var handles: [SessionID: SSHDriverSession] = [:]
+    private let vncDriver: (any VNCSessionDriving)?
+    private var handles: [SessionID: LiveSession] = [:]
     private var attempts: [SessionID: UUID] = [:]
     private var reportedExitStatuses: [SessionID: Int32] = [:]
     private var pendingConnectionFacts: [SessionID: ConnectionFacts] = [:]
@@ -26,11 +52,13 @@ final class SessionCoordinator {
     init(
         library: any MachineLibrary,
         prober: any AddressProbing,
-        driver: any SSHSessionDriving
+        driver: any SSHSessionDriving,
+        vncDriver: (any VNCSessionDriving)? = nil
     ) {
         self.library = library
         self.prober = prober
         self.driver = driver
+        self.vncDriver = vncDriver
     }
 
     var selectedSession: SessionSummary? {
@@ -44,6 +72,14 @@ final class SessionCoordinator {
 
     func terminal(for id: SessionID) -> (any TerminalSession)? {
         handles[id]?.terminal
+    }
+
+    func remoteDesktop(for id: SessionID) -> (any RemoteDesktopSession)? {
+        handles[id]?.remoteDesktop
+    }
+
+    func isRemoteDesktop(_ id: SessionID) -> Bool {
+        sessions.first { $0.id == id }?.protocolKind == .vnc
     }
 
     /// Connected sessions for a machine.
@@ -68,7 +104,9 @@ final class SessionCoordinator {
             title: machine.name,
             machineName: machine.name,
             profileName: profile.name,
-            state: .connecting(startedAt: .now)))
+            state: .connecting(startedAt: .now),
+            protocolKind: profile.protocolKind,
+            username: profile.username))
         selectedSessionID = id
         scheduleWorkspaceSave()
         await connect(id, snapshot: snapshot)
@@ -113,15 +151,24 @@ final class SessionCoordinator {
 
     func disconnect(sessionID: SessionID) {
         attempts[sessionID] = UUID()
-        guard let handle = handles.removeValue(forKey: sessionID) else {
-            update(sessionID) { $0.state = .disconnected }
-            return
-        }
-        update(sessionID) { $0.state = .disconnecting }
-        handle.close()
-        reportedExitStatuses.removeValue(forKey: sessionID)
         pendingConnectionFacts.removeValue(forKey: sessionID)
-        update(sessionID) { $0.state = .disconnected }
+        reportedExitStatuses.removeValue(forKey: sessionID)
+        switch handles[sessionID] {
+        case .ssh(let handle):
+            handles.removeValue(forKey: sessionID)
+            update(sessionID) { $0.state = .disconnecting }
+            handle.close()
+            update(sessionID) { $0.state = .disconnected }
+        case .remoteDesktop(let session) where session.state.isLive:
+            // The desktop closes asynchronously; its disconnected event finishes this.
+            update(sessionID) { $0.state = .disconnecting }
+            session.disconnect()
+        case .remoteDesktop:
+            handles.removeValue(forKey: sessionID)?.close()
+            update(sessionID) { $0.state = .disconnected }
+        case nil:
+            update(sessionID) { $0.state = .disconnected }
+        }
     }
 
     func close(sessionID: SessionID) {
@@ -215,6 +262,11 @@ final class SessionCoordinator {
         scheduleWorkspaceSave()
     }
 
+    func setDisplayMode(_ mode: RemoteDesktopDisplayMode, for sessionID: SessionID) {
+        handles[sessionID]?.remoteDesktop?.displayMode = mode
+        update(sessionID) { $0.displayMode = mode }
+    }
+
     func restoreWorkspace(from snapshot: MachineLibrarySnapshot) {
         guard sessions.isEmpty else { return }
         sessions = snapshot.workspaceTabs.compactMap { tab in
@@ -226,7 +278,9 @@ final class SessionCoordinator {
                 title: tab.title.isEmpty ? machine.name : tab.title,
                 machineName: machine.name,
                 profileName: profile.name,
-                state: .disconnected)
+                state: .disconnected,
+                protocolKind: profile.protocolKind,
+                username: profile.username)
         }
         selectedSessionID = snapshot.workspaceTabs.first(where: \.isSelected).flatMap { selected in
             sessions.contains(where: { $0.id == selected.id }) ? selected.id : nil
@@ -262,12 +316,12 @@ final class SessionCoordinator {
     }
 
     func performSearch() {
-        guard let selectedSessionID, handles[selectedSessionID] != nil else { return }
+        guard let selectedSessionID, terminal(for: selectedSessionID) != nil else { return }
         searchSessionID = selectedSessionID
     }
 
     func dismissSearch(sessionID: SessionID) {
-        _ = handles[sessionID]?.terminal.performBinding("end_search")
+        _ = terminal(for: sessionID)?.performBinding("end_search")
         if searchSessionID == sessionID { searchSessionID = nil }
     }
 
@@ -277,7 +331,8 @@ final class SessionCoordinator {
 
     func disconnectAllForTermination() {
         for id in sessions.filter({ $0.state.hasLiveProcess }).map(\.id) {
-            disconnect(sessionID: id)
+            handles.removeValue(forKey: id)?.close()
+            update(id) { $0.state = .disconnected }
         }
     }
 
@@ -288,20 +343,22 @@ final class SessionCoordinator {
         try await library.save(.replaceWorkspace(workspaceTabs))
     }
 
+    // MARK: Connecting
+
     private func connect(_ sessionID: SessionID, snapshot: MachineLibrarySnapshot?) async {
         let attempt = UUID()
         attempts[sessionID] = attempt
         reportedExitStatuses.removeValue(forKey: sessionID)
         guard let summary = sessions.first(where: { $0.id == sessionID }) else { return }
 
-        let request: SSHSessionRequest
         switch summary.target {
         case .quick(let target):
-            request = SSHSessionRequest(
+            let request = SSHSessionRequest(
                 destination: SSHDestination(host: target.host, user: target.username, port: target.port),
                 hostKeyAlias: nil,
                 authentication: .agent,
                 credentialID: nil)
+            startSSH(request, for: sessionID, attempt: attempt)
 
         case .saved(let machineID, let profileID):
             let loaded: MachineLibrarySnapshot
@@ -315,37 +372,79 @@ final class SessionCoordinator {
                 fail(sessionID, attempt: attempt, with: .launchFailed("The profile no longer exists."))
                 return
             }
-            guard case .ssh(let ssh) = profile else {
+            let port: Int
+            switch profile {
+            case .ssh(let ssh): port = ssh.port
+            case .vnc(let vnc): port = vnc.port
+            case .rdp, .appleScreenSharing:
                 fail(sessionID, attempt: attempt, with: .unsupportedProtocol(profile.protocolKind))
                 return
             }
-            var addresses = loaded.addresses(for: machineID)
-            if case .pinned(let addressID) = profile.addressSelection {
-                addresses = addresses.filter { $0.id == addressID }
-            }
-            guard !addresses.isEmpty else {
-                fail(sessionID, attempt: attempt, with: .noAddress)
+            guard let address = await resolveAddress(for: profile, machineID: machineID, port: port, in: loaded, sessionID: sessionID, attempt: attempt) else {
                 return
             }
-            var reachable: MachineAddress?
-            for address in addresses {
-                guard attempts[sessionID] == attempt else { return }
-                if await prober.canConnect(host: address.host, port: ssh.port, timeout: .seconds(2)) {
-                    reachable = address
-                    break
-                }
+            update(sessionID) {
+                $0.endpoint = SessionEndpoint(host: address.host, port: port)
+                $0.protocolKind = profile.protocolKind
+                $0.username = profile.username
             }
-            guard let reachable else {
-                fail(sessionID, attempt: attempt, with: .unreachable)
-                return
-            }
-            request = SSHSessionRequest(
-                destination: SSHDestination(host: reachable.host, user: ssh.username, port: ssh.port),
-                hostKeyAlias: "constellation-\(machineID)",
-                authentication: ssh.authentication,
-                credentialID: ssh.credentialID)
-        }
 
+            switch profile {
+            case .ssh(let ssh):
+                startSSH(
+                    SSHSessionRequest(
+                        destination: SSHDestination(host: address.host, user: ssh.username, port: ssh.port),
+                        hostKeyAlias: "constellation-\(machineID)",
+                        authentication: ssh.authentication,
+                        credentialID: ssh.credentialID),
+                    for: sessionID,
+                    attempt: attempt)
+            case .vnc(let vnc):
+                startVNC(
+                    VNCSessionRequest(
+                        host: address.host,
+                        port: vnc.port,
+                        username: vnc.username,
+                        credentialID: vnc.credentialID,
+                        sharesClipboard: vnc.sharesClipboard,
+                        machineName: summary.machineName ?? summary.title),
+                    for: sessionID,
+                    attempt: attempt)
+            case .rdp, .appleScreenSharing:
+                return
+            }
+        }
+    }
+
+    /// Pinned address, or the first one in priority order that accepts a TCP
+    /// connection. Exactly one address reaches a driver.
+    private func resolveAddress(
+        for profile: ConnectionProfile,
+        machineID: MachineID,
+        port: Int,
+        in snapshot: MachineLibrarySnapshot,
+        sessionID: SessionID,
+        attempt: UUID
+    ) async -> MachineAddress? {
+        var addresses = snapshot.addresses(for: machineID)
+        if case .pinned(let addressID) = profile.addressSelection {
+            addresses = addresses.filter { $0.id == addressID }
+        }
+        guard !addresses.isEmpty else {
+            fail(sessionID, attempt: attempt, with: .noAddress)
+            return nil
+        }
+        for address in addresses {
+            guard attempts[sessionID] == attempt else { return nil }
+            if await prober.canConnect(host: address.host, port: port, timeout: .seconds(2)) {
+                return address
+            }
+        }
+        fail(sessionID, attempt: attempt, with: .unreachable)
+        return nil
+    }
+
+    private func startSSH(_ request: SSHSessionRequest, for sessionID: SessionID, attempt: UUID) {
         guard attempts[sessionID] == attempt else { return }
         do {
             let handle = try driver.start(request)
@@ -354,7 +453,7 @@ final class SessionCoordinator {
                 handle.close()
                 return
             }
-            handles[sessionID] = handle
+            handles[sessionID] = .ssh(handle)
             pendingConnectionFacts[sessionID] = ConnectionFacts(
                 host: request.destination.host,
                 port: request.destination.port ?? 22,
@@ -367,8 +466,33 @@ final class SessionCoordinator {
         }
     }
 
+    private func startVNC(_ request: VNCSessionRequest, for sessionID: SessionID, attempt: UUID) {
+        guard attempts[sessionID] == attempt else { return }
+        guard let vncDriver else {
+            fail(sessionID, attempt: attempt, with: .unsupportedProtocol(.vnc))
+            return
+        }
+        do {
+            let session = try vncDriver.start(request)
+            guard attempts[sessionID] == attempt,
+                  sessions.contains(where: { $0.id == sessionID }) else { return }
+            let mode = sessions.first(where: { $0.id == sessionID })?.displayMode ?? .fit
+            session.displayMode = mode
+            handles[sessionID] = .remoteDesktop(session)
+            let facts = ConnectionFacts(host: request.host, port: request.port, connectedAt: Date())
+            session.eventHandler = { [weak self] event in
+                self?.handle(event, facts: facts, for: sessionID)
+            }
+            session.connect()
+        } catch {
+            fail(sessionID, attempt: attempt, with: .launchFailed(error.localizedDescription))
+        }
+    }
+
+    // MARK: Events
+
     private func handle(_ event: TerminalEvent, for sessionID: SessionID) {
-        guard let handle = handles[sessionID] else { return }
+        guard case .ssh(let handle) = handles[sessionID] else { return }
         switch event {
         case .titleChanged(let title):
             if let code = handle.exitStatusChannel.exitStatus(fromTitle: title) {
@@ -402,6 +526,34 @@ final class SessionCoordinator {
                     title: "Terminal Renderer Stopped",
                     message: "The terminal renderer stopped responding. Close and reopen the session.")
             }
+        }
+    }
+
+    private func handle(_ event: VNCSessionEvent, facts: ConnectionFacts, for sessionID: SessionID) {
+        guard case .remoteDesktop = handles[sessionID] else { return }
+        switch event {
+        case .stateChanged(let state):
+            switch state {
+            case .idle:
+                break
+            case .connecting:
+                update(sessionID) { $0.state = .connecting(startedAt: .now) }
+            case .connected:
+                update(sessionID) { $0.state = .connected(ConnectionFacts(host: facts.host, port: facts.port, connectedAt: Date())) }
+            case .disconnecting:
+                update(sessionID) { $0.state = .disconnecting }
+            case .disconnected(let failure):
+                handles.removeValue(forKey: sessionID)?.close()
+                update(sessionID) {
+                    switch failure {
+                    case nil: $0.state = .disconnected
+                    case let failure? where failure.isAuthenticationFailure: $0.state = .failed(.authenticationFailed(failure.message))
+                    case let failure?: $0.state = .failed(.remoteDesktop(failure.message))
+                    }
+                }
+            }
+        case .framebufferSizeChanged:
+            break
         }
     }
 

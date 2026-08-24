@@ -1,9 +1,25 @@
 import ConstellationCore
+import ConstellationVNC
 import Foundation
 
 enum SessionTarget: Hashable, Sendable {
     case saved(machineID: MachineID, profileID: ProfileID)
     case quick(QuickConnectTarget)
+}
+
+struct SessionEndpoint: Equatable, Sendable {
+    var host: String
+    var port: Int
+
+    /// `vnc://user@host:port` for Apple's Screen Sharing app.
+    func screenSharingURL(username: String?) -> URL? {
+        var components = URLComponents()
+        components.scheme = "vnc"
+        components.host = host
+        components.port = port
+        if let username, !username.isEmpty { components.user = username }
+        return components.url
+    }
 }
 
 struct ConnectionFacts: Equatable, Sendable {
@@ -23,6 +39,8 @@ enum ConnectionFailure: Error, Equatable, Sendable, LocalizedError {
     case launchFailed(String)
     case sshExited(Int32)
     case endedWithoutStatus
+    case authenticationFailed(String)
+    case remoteDesktop(String)
 
     var errorDescription: String? {
         switch self {
@@ -32,6 +50,8 @@ enum ConnectionFailure: Error, Equatable, Sendable, LocalizedError {
         case .launchFailed(let message): "The SSH session could not start. \(message)"
         case .sshExited(let code): "SSH exited with status \(code)."
         case .endedWithoutStatus: "SSH ended without reporting its exit status."
+        case .authenticationFailed(let message): message
+        case .remoteDesktop(let message): message
         }
     }
 }
@@ -74,6 +94,10 @@ struct SessionSummary: Identifiable, Equatable, Sendable {
     var machineName: String?
     var profileName: String
     var state: SessionState
+    /// The address the last attempt resolved to; also feeds the Screen Sharing handoff.
+    var endpoint: SessionEndpoint?
+    /// Remote desktop sessions only.
+    var displayMode: RemoteDesktopDisplayMode = .fit
 
     var machineID: MachineID? {
         guard case .saved(let machineID, _) = target else { return nil }
@@ -84,6 +108,11 @@ struct SessionSummary: Identifiable, Equatable, Sendable {
         guard case .saved(_, let profileID) = target else { return nil }
         return profileID
     }
+
+    /// Known once the profile was loaded; Quick Connect is always SSH.
+    var protocolKind: ConnectionProtocol = .ssh
+    /// The profile's account name, for the Screen Sharing handoff.
+    var username: String?
 }
 
 /// A close the user must confirm because a live process would be cut.

@@ -14,6 +14,7 @@ struct MachineDraft: Equatable {
     var tagsText: String
     var addresses: [MachineAddress]
     var profiles: [SSHProfileDraft]
+    var vncProfiles: [VNCProfileDraft]
     var removedAddressIDs: Set<AddressID> = []
     var removedProfileIDs: Set<ProfileID> = []
     var removedCredentialIDs: Set<CredentialID> = []
@@ -25,6 +26,7 @@ struct MachineDraft: Equatable {
         tagsText = ""
         addresses = [MachineAddress(machineID: machine.id, label: "", host: "")]
         profiles = [SSHProfileDraft(profile: SSHProfile(machineID: machine.id))]
+        vncProfiles = []
         isNew = true
     }
 
@@ -36,16 +38,29 @@ struct MachineDraft: Equatable {
             guard case .ssh(let ssh) = profile else { return nil }
             return SSHProfileDraft(profile: ssh, credential: ssh.credentialID.flatMap(snapshot.credential))
         }
+        vncProfiles = snapshot.profiles(for: machine.id).compactMap { profile in
+            guard case .vnc(let vnc) = profile else { return nil }
+            return VNCProfileDraft(profile: vnc, credential: vnc.credentialID.flatMap(snapshot.credential))
+        }
         isNew = false
     }
 
     var pendingSecrets: [PendingSecret] {
-        profiles.compactMap { draft in
+        let ssh = profiles.compactMap { draft -> PendingSecret? in
             guard draft.needsSecret, let secret = draft.enteredSecret, !secret.isEmpty,
                   let id = draft.profile.credentialID else { return nil }
             return PendingSecret(credentialID: id, secret: Secret(secret))
         }
+        let vnc = vncProfiles.compactMap { draft -> PendingSecret? in
+            guard let secret = draft.enteredSecret, !secret.isEmpty,
+                  let id = draft.profile.credentialID else { return nil }
+            return PendingSecret(credentialID: id, secret: Secret(secret))
+        }
+        return ssh + vnc
     }
+
+    /// Every profile id in editor order, SSH first.
+    var profileIDs: [ProfileID] { profiles.map(\.id) + vncProfiles.map(\.id) }
 
     mutating func addAddress() {
         addresses.append(MachineAddress(machineID: machine.id, label: "", host: "", priority: addresses.count))
@@ -63,10 +78,22 @@ struct MachineDraft: Equatable {
         profiles.append(SSHProfileDraft(profile: SSHProfile(machineID: machine.id, name: profiles.isEmpty ? "SSH" : "SSH \(profiles.count + 1)")))
     }
 
+    mutating func addVNCProfile() {
+        vncProfiles.append(VNCProfileDraft(profile: VNCProfile(
+            machineID: machine.id,
+            name: vncProfiles.isEmpty ? "VNC" : "VNC \(vncProfiles.count + 1)")))
+    }
+
     mutating func removeProfile(_ id: ProfileID) {
-        guard let index = profiles.firstIndex(where: { $0.profile.id == id }) else { return }
-        if let credential = profiles[index].profile.credentialID { removedCredentialIDs.insert(credential) }
-        profiles.remove(at: index)
+        if let index = profiles.firstIndex(where: { $0.profile.id == id }) {
+            if let credential = profiles[index].profile.credentialID { removedCredentialIDs.insert(credential) }
+            profiles.remove(at: index)
+        } else if let index = vncProfiles.firstIndex(where: { $0.profile.id == id }) {
+            if let credential = vncProfiles[index].profile.credentialID { removedCredentialIDs.insert(credential) }
+            vncProfiles.remove(at: index)
+        } else {
+            return
+        }
         removedProfileIDs.insert(id)
         if machine.defaultProfileID == id { machine.defaultProfileID = nil }
     }
@@ -76,7 +103,7 @@ struct MachineDraft: Equatable {
         var machine = self.machine
         machine.name = machine.name.trimmingCharacters(in: .whitespaces)
         machine.tags = Set(tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
-        if machine.defaultProfileID == nil { machine.defaultProfileID = profiles.first?.profile.id }
+        if machine.defaultProfileID == nil { machine.defaultProfileID = profileIDs.first }
 
         var changes: [MachineLibraryChange] = [.upsertMachine(machine)]
         for (index, var address) in addresses.enumerated() {
@@ -94,8 +121,16 @@ struct MachineDraft: Equatable {
             }
             changes.append(.upsertProfile(.ssh(profile)))
         }
+        for draft in vncProfiles {
+            let profile = draft.resolvedProfile()
+            if let credential = draft.resolvedCredential(machineName: machine.name) {
+                changes.append(.upsertCredential(credential))
+            }
+            changes.append(.upsertProfile(.vnc(profile)))
+        }
         changes += removedProfileIDs.map { .deleteProfile($0) }
-        changes += removedCredentialIDs.subtracting(Set(profiles.compactMap(\.profile.credentialID))).map { .deleteCredential($0) }
+        let keptCredentials = Set(profiles.compactMap(\.profile.credentialID) + vncProfiles.compactMap(\.profile.credentialID))
+        changes += removedCredentialIDs.subtracting(keptCredentials).map { .deleteCredential($0) }
 
         let change = MachineLibraryChange.batch(changes)
         try Validator.validate(change)
@@ -187,5 +222,48 @@ struct SSHProfileDraft: Identifiable, Equatable {
         guard let id = resolved.credentialID else { return nil }
         let kind: CredentialKind = authMode == .password ? .password : .passphrase
         return CredentialReference(id: id, label: "\(machineName) · \(resolved.name) \(kind.displayName.lowercased())", kind: kind)
+    }
+}
+
+/// One VNC profile under edit. The password is optional: without one the app
+/// prompts at connect time. Apple Remote Desktop also needs the username.
+struct VNCProfileDraft: Identifiable, Equatable {
+    var profile: VNCProfile
+    var enteredSecret: String? {
+        didSet {
+            if let entered = enteredSecret, !entered.isEmpty, profile.credentialID == nil {
+                profile.credentialID = CredentialID()
+            }
+        }
+    }
+    var existingCredentialLabel: String?
+    var id: ProfileID { profile.id }
+
+    init(profile: VNCProfile, credential: CredentialReference? = nil) {
+        self.profile = profile
+        existingCredentialLabel = credential?.label
+    }
+
+    var hasStoredSecret: Bool { existingCredentialLabel != nil && profile.credentialID != nil }
+
+    mutating func removeStoredSecret() {
+        profile.credentialID = nil
+        existingCredentialLabel = nil
+        enteredSecret = nil
+    }
+
+    func resolvedProfile() -> VNCProfile {
+        var profile = self.profile
+        profile.name = profile.name.trimmingCharacters(in: .whitespaces)
+        profile.username = profile.username?.trimmingCharacters(in: .whitespaces)
+        if profile.username?.isEmpty == true { profile.username = nil }
+        let hasSecret = hasStoredSecret || enteredSecret?.isEmpty == false
+        if !hasSecret { profile.credentialID = nil }
+        return profile
+    }
+
+    func resolvedCredential(machineName: String) -> CredentialReference? {
+        guard enteredSecret?.isEmpty == false, let id = resolvedProfile().credentialID else { return nil }
+        return CredentialReference(id: id, label: "\(machineName) · \(resolvedProfile().name) VNC password", kind: .password)
     }
 }

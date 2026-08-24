@@ -1,5 +1,7 @@
+import AppKit
 import ConstellationCore
 import ConstellationTerminal
+import ConstellationVNC
 import SwiftUI
 
 struct WorkspaceDetailView: View {
@@ -159,12 +161,34 @@ private struct SessionActions: View {
             Button(action: reconnect) { Label("Reconnect", systemImage: "arrow.clockwise") }
                 .help("Reconnect (⌘R)")
         }
+        if sessions.remoteDesktop(for: summary.id) != nil {
+            Picker("Display", selection: Binding(
+                get: { summary.displayMode },
+                set: { sessions.setDisplayMode($0, for: summary.id) })) {
+                Label("Fit to Window", systemImage: "arrow.down.right.and.arrow.up.left").tag(RemoteDesktopDisplayMode.fit)
+                Label("Actual Size", systemImage: "1.magnifyingglass").tag(RemoteDesktopDisplayMode.actualSize)
+            }
+            .pickerStyle(.menu)
+            .help("Display")
+        }
+        if let url = screenSharingURL {
+            Button { NSWorkspace.shared.open(url) } label: {
+                Label("Open in Screen Sharing", systemImage: "macwindow.on.rectangle")
+            }
+            .help("Open in Apple’s Screen Sharing app")
+        }
         if includesClose {
             Divider()
             Button("Close") { sessions.requestClose(sessionID: summary.id) }
             Button("Close Others") { sessions.requestCloseOthers(keeping: summary.id) }
                 .disabled(sessions.sessions.count < 2)
         }
+    }
+
+    /// VNC sessions only, once an address has been resolved.
+    private var screenSharingURL: URL? {
+        guard sessions.isRemoteDesktop(summary.id), let endpoint = summary.endpoint else { return nil }
+        return endpoint.screenSharingURL(username: summary.username)
     }
 
     private func reconnect() {
@@ -193,6 +217,9 @@ private struct SessionContentView: View {
                             else { sessions.dismissSearch(sessionID: summary.id) }
                         }),
                     onReconnect: reconnect)
+                    .id(summary.id)
+            } else if let desktop = sessions.remoteDesktop(for: summary.id) {
+                RemoteDesktopPane(session: desktop, state: summary.state, onReconnect: reconnect)
                     .id(summary.id)
             } else {
                 ContentUnavailableView {
@@ -227,7 +254,7 @@ private struct SessionContentView: View {
     }
 
     private var statusIcon: String {
-        if case .failed = summary.state { "exclamationmark.triangle" } else { "terminal" }
+        if case .failed = summary.state { "exclamationmark.triangle" } else { summary.protocolKind.symbolName }
     }
 
     private func reconnect() {
@@ -298,7 +325,15 @@ struct MachineOverviewView: View {
                     }
                     ForEach(profiles) { profile in
                         LabeledContent {
-                            Button("Connect") { connect(profile.id) }
+                            HStack {
+                                if case .vnc(let vnc) = profile, let url = screenSharingURL(for: vnc) {
+                                    Button { NSWorkspace.shared.open(url) } label: {
+                                        Image(systemName: "macwindow.on.rectangle")
+                                    }
+                                    .help("Open in Apple’s Screen Sharing app")
+                                }
+                                Button("Connect") { connect(profile.id) }
+                            }
                         } label: {
                             HStack(spacing: 7) {
                                 Image(systemName: profile.protocolKind.symbolName).foregroundStyle(.secondary)
@@ -382,6 +417,10 @@ struct MachineOverviewView: View {
         if let username = profile.username, !username.isEmpty { parts.append(username) }
         if let port = profile.port, port != profile.protocolKind.defaultPort { parts.append("port \(port)") }
         if case .ssh(let ssh) = profile { parts.append(ssh.authentication.displayName) }
+        if case .vnc(let vnc) = profile {
+            parts.append("unencrypted")
+            if vnc.sharesClipboard { parts.append("clipboard shared") }
+        }
         switch profile.addressSelection {
         case .automatic:
             parts.append("first reachable address")
@@ -393,7 +432,18 @@ struct MachineOverviewView: View {
         return parts.joined(separator: " · ")
     }
 
-    /// Probes the SSH port the default profile uses; addresses carry no port of their own.
+    /// The pinned address, else the first one: enough for a `vnc://` handoff.
+    private func screenSharingURL(for vnc: VNCProfile) -> URL? {
+        let addresses = store.snapshot.addresses(for: machine.id)
+        let address: MachineAddress? = switch vnc.addressSelection {
+        case .automatic: addresses.first
+        case .pinned(let id): addresses.first { $0.id == id }
+        }
+        guard let address else { return nil }
+        return SessionEndpoint(host: address.host, port: vnc.port).screenSharingURL(username: vnc.username)
+    }
+
+    /// Probes the port the default profile uses; addresses carry no port of their own.
     private var probePort: Int {
         let profiles = store.snapshot.orderedProfiles(for: machine)
         let profile = machine.defaultProfileID.flatMap { id in profiles.first { $0.id == id } } ?? profiles.first
@@ -443,4 +493,50 @@ struct MachineOverviewView: View {
         case .disconnected: .secondary
         }
     }
+}
+
+/// Hosts a remote desktop view with connection state on top.
+private struct RemoteDesktopPane: View {
+    let session: any RemoteDesktopSession
+    let state: SessionState
+    let onReconnect: () -> Void
+
+    var body: some View {
+        RemoteDesktopHostRepresentable(view: session.view)
+            .overlay {
+                if case .connecting = state {
+                    VStack(spacing: 10) {
+                        ProgressView()
+                        Text("Connecting…").foregroundStyle(.secondary)
+                    }
+                    .padding(20)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .overlay(alignment: .top) {
+                if !state.hasLiveProcess {
+                    HStack(spacing: 10) {
+                        Text(statusText).font(.callout)
+                        Button("Reconnect", action: onReconnect).controlSize(.small)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(.top, 8)
+                }
+            }
+            .onAppear { session.focus() }
+    }
+
+    private var statusText: String {
+        if case .failed(let failure) = state { return failure.localizedDescription }
+        return "Session disconnected"
+    }
+}
+
+private struct RemoteDesktopHostRepresentable: NSViewRepresentable {
+    let view: NSView
+
+    func makeNSView(context: Context) -> NSView { view }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

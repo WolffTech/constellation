@@ -3,6 +3,7 @@ import ConstellationCore
 import ConstellationOpenSSH
 import ConstellationStorage
 import ConstellationTerminal
+import ConstellationVNC
 import Foundation
 import Observation
 
@@ -39,7 +40,11 @@ final class CompositionRoot {
             }
             self.askPass = askPass
             let driver = GhosttySSHSessionDriver(runtime: runtime, askPass: askPass)
-            sessions = SessionCoordinator(library: library, prober: TCPAddressProber(), driver: driver)
+            sessions = SessionCoordinator(
+                library: library,
+                prober: TCPAddressProber(),
+                driver: driver,
+                vncDriver: RoyalVNCSessionDriver(vault: vault))
         } catch {
             startupError = error.localizedDescription
         }
@@ -55,6 +60,16 @@ final class CompositionRoot {
                 else { try await sessions.openDefaultProfile(for: machineID) }
             } catch { sessions.present(error, title: "Couldn’t Connect") }
         }
+    }
+
+    var selectedSessionIsRemoteDesktop: Bool {
+        guard let sessions, let id = sessions.selectedSessionID else { return false }
+        return sessions.remoteDesktop(for: id) != nil
+    }
+
+    func setDisplayMode(_ mode: RemoteDesktopDisplayMode) {
+        guard let sessions, let id = sessions.selectedSessionID else { return }
+        sessions.setDisplayMode(mode, for: id)
     }
 
     func reconnectSelectedSession() {

@@ -92,4 +92,64 @@ struct MachineDraftTests {
         #expect(changes.contains(.deleteProfile(profile.id)))
         #expect(changes.contains(.deleteCredential(credential.id)))
     }
+
+    @Test func editingKeepsVNCProfilesAndTheirStoredPassword() throws {
+        let machine = Machine(name: "screen")
+        let credential = CredentialReference(label: "screen · VNC VNC password", kind: .password)
+        let vnc = VNCProfile(machineID: machine.id, username: "nick", credentialID: credential.id, sharesClipboard: true)
+        let ssh = SSHProfile(machineID: machine.id)
+        let snapshot = MachineLibrarySnapshot(
+            machines: [machine],
+            addresses: [],
+            profiles: [.ssh(ssh), .vnc(vnc)],
+            credentials: [credential])
+
+        var draft = MachineDraft(editing: machine, in: snapshot)
+        #expect(draft.vncProfiles.map(\.id) == [vnc.id])
+        #expect(draft.vncProfiles[0].hasStoredSecret)
+        #expect(draft.profileIDs == [ssh.id, vnc.id])
+
+        draft.vncProfiles[0].profile.sharesClipboard = false
+        let change = try draft.change()
+        guard case .batch(let changes) = change else {
+            Issue.record("expected a batch")
+            return
+        }
+        let saved = changes.compactMap { change -> VNCProfile? in
+            if case .upsertProfile(.vnc(let profile)) = change { profile } else { nil }
+        }
+        #expect(saved.map(\.credentialID) == [credential.id])
+        #expect(saved.first?.sharesClipboard == false)
+        #expect(draft.pendingSecrets.isEmpty)
+    }
+
+    @Test func typingAVNCPasswordAllocatesOneCredential() throws {
+        var draft = MachineDraft(newMachine: "screen")
+        draft.addresses[0].host = "10.0.0.9"
+        draft.addVNCProfile()
+        draft.vncProfiles[0].enteredSecret = "s3cret"
+
+        let credentialID = try #require(draft.vncProfiles[0].profile.credentialID)
+        #expect(draft.pendingSecrets.map(\.credentialID) == [credentialID])
+        let reference = try #require(draft.vncProfiles[0].resolvedCredential(machineName: "screen"))
+        #expect(reference.id == credentialID)
+        #expect(reference.kind == .password)
+        // The SSH profile created with the machine stays the default.
+        _ = try draft.change()
+        #expect(draft.machine.defaultProfileID == nil)
+    }
+
+    @Test func removingAVNCProfileForgetsItsCredential() {
+        let machine = Machine(name: "screen")
+        let credential = CredentialReference(label: "x", kind: .password)
+        let vnc = VNCProfile(machineID: machine.id, credentialID: credential.id)
+        let snapshot = MachineLibrarySnapshot(machines: [machine], addresses: [], profiles: [.vnc(vnc)], credentials: [credential])
+        var draft = MachineDraft(editing: machine, in: snapshot)
+
+        draft.removeProfile(vnc.id)
+
+        #expect(draft.vncProfiles.isEmpty)
+        #expect(draft.removedProfileIDs == [vnc.id])
+        #expect(draft.removedCredentialIDs == [credential.id])
+    }
 }

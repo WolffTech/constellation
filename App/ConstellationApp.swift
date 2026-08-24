@@ -1,4 +1,5 @@
 import AppKit
+import ConstellationVNC
 import SwiftUI
 
 @main
@@ -32,6 +33,13 @@ struct ConstellationApp: App {
                 .disabled((root.sessions?.sessions.count ?? 0) < 2)
                 Button("Close Window") { NSApplication.shared.keyWindow?.performClose(nil) }
                     .keyboardShortcut("w", modifiers: [.command, .shift])
+            }
+            CommandGroup(after: .toolbar) {
+                Button("Fit to Window") { root.setDisplayMode(.fit) }
+                    .disabled(!root.selectedSessionIsRemoteDesktop)
+                Button("Actual Size") { root.setDisplayMode(.actualSize) }
+                    .disabled(!root.selectedSessionIsRemoteDesktop)
+                Divider()
             }
             CommandGroup(after: .importExport) {
                 Button("Import Machines…") { Task { await ImportExportPanels.importMachines(into: root.store) } }

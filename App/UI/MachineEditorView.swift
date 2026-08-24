@@ -73,9 +73,20 @@ struct MachineEditorView: View {
                         onMakeDefault: { draft.machine.defaultProfileID = profile.id },
                         onRemove: { draft.removeProfile(profile.id) })
                 }
+                ForEach($draft.vncProfiles) { $profile in
+                    VNCProfileSection(
+                        draft: $profile,
+                        addresses: draft.addresses,
+                        isDefault: draft.machine.defaultProfileID == profile.id,
+                        onMakeDefault: { draft.machine.defaultProfileID = profile.id },
+                        onRemove: { draft.removeProfile(profile.id) })
+                }
                 Section {
                     Button { draft.addProfile() } label: {
                         Label("Add SSH Profile", systemImage: "plus")
+                    }
+                    Button { draft.addVNCProfile() } label: {
+                        Label("Add VNC Profile", systemImage: "plus")
                     }
                 }
             }
@@ -210,39 +221,19 @@ private struct SSHProfileSection: View {
         }
     }
 
-    @ViewBuilder
     private var secretRow: some View {
-        let title = draft.authMode == .password ? "Password" : "Key passphrase"
-        if draft.hasStoredSecret, draft.enteredSecret == nil {
-            LabeledContent(title) {
-                HStack {
-                    Label("\(title) saved in Keychain", systemImage: "key.fill")
-                    Spacer()
-                    Button("Replace…") { draft.enteredSecret = "" }
-                    Button("Remove") { draft.removeStoredSecret() }
-                }
-            }
-        } else {
-            LabeledContent(title) {
-                HStack {
-                    SecureField(title, text: secret, prompt: Text(draft.authMode == .password ? "Password" : "Leave empty if the key has none"))
-                        .labelsHidden()
-                    if draft.hasStoredSecret {
-                        Button("Keep Saved") { draft.enteredSecret = nil }
-                    }
-                }
-            }
-        }
+        SecretRow(
+            title: draft.authMode == .password ? "Password" : "Key passphrase",
+            prompt: draft.authMode == .password ? "Password" : "Leave empty if the key has none",
+            hasStoredSecret: draft.hasStoredSecret,
+            enteredSecret: $draft.enteredSecret,
+            onRemoveStored: { draft.removeStoredSecret() })
     }
 
     private var username: Binding<String> {
         Binding(
             get: { draft.profile.username ?? "" },
             set: { draft.profile.username = $0.isEmpty ? nil : $0 })
-    }
-
-    private var secret: Binding<String> {
-        Binding(get: { draft.enteredSecret ?? "" }, set: { draft.enteredSecret = $0 })
     }
 
     private func chooseKeyFile() {
@@ -254,6 +245,98 @@ private struct SSHProfileSection: View {
         panel.message = "Choose the private key for this profile"
         if panel.runModal() == .OK, let url = panel.url {
             draft.keyFilePath = url.path
+        }
+    }
+}
+
+private struct VNCProfileSection: View {
+    @Binding var draft: VNCProfileDraft
+    let addresses: [MachineAddress]
+    let isDefault: Bool
+    let onMakeDefault: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        Section {
+            TextField("Profile name", text: $draft.profile.name, prompt: Text("VNC"))
+            TextField("Username", text: username, prompt: Text("Needed for Apple Remote Desktop"))
+            TextField("Port", value: $draft.profile.port, format: .number.grouping(.never), prompt: Text("5900"))
+            Picker("Address", selection: $draft.profile.addressSelection) {
+                Text("Automatic (first reachable)").tag(AddressSelection.automatic)
+                ForEach(addresses) { address in
+                    Text("\(address.displayLabel) — \(address.host)").tag(AddressSelection.pinned(address.id))
+                }
+            }
+            SecretRow(
+                title: "Password",
+                prompt: "Optional; asked when connecting if empty",
+                hasStoredSecret: draft.hasStoredSecret,
+                enteredSecret: $draft.enteredSecret,
+                onRemoveStored: { draft.removeStoredSecret() })
+            Toggle("Share clipboard with the remote desktop", isOn: $draft.profile.sharesClipboard)
+        } header: {
+            HStack(spacing: 8) {
+                Label(draft.profile.name.isEmpty ? "VNC Profile" : draft.profile.name, systemImage: ConnectionProtocol.vnc.symbolName)
+                if isDefault {
+                    Text("Default")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
+                } else {
+                    Button("Make Default", action: onMakeDefault)
+                        .controlSize(.small)
+                }
+                Spacer()
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Remove profile")
+            }
+        } footer: {
+            Label(
+                "VNC is not encrypted. Everything in this session, including the password, crosses the network in the clear. Use it only on a trusted LAN, VPN or Tailscale route.",
+                systemImage: "lock.open")
+        }
+    }
+
+    private var username: Binding<String> {
+        Binding(
+            get: { draft.profile.username ?? "" },
+            set: { draft.profile.username = $0.isEmpty ? nil : $0 })
+    }
+}
+
+/// A secret that is never shown back: saved in Keychain, or typed now.
+private struct SecretRow: View {
+    let title: String
+    let prompt: String
+    let hasStoredSecret: Bool
+    @Binding var enteredSecret: String?
+    let onRemoveStored: () -> Void
+
+    var body: some View {
+        if hasStoredSecret, enteredSecret == nil {
+            LabeledContent(title) {
+                HStack {
+                    Label("\(title) saved in Keychain", systemImage: "key.fill")
+                    Spacer()
+                    Button("Replace…") { enteredSecret = "" }
+                    Button("Remove", action: onRemoveStored)
+                }
+            }
+        } else {
+            LabeledContent(title) {
+                HStack {
+                    SecureField(title, text: Binding(get: { enteredSecret ?? "" }, set: { enteredSecret = $0 }), prompt: Text(prompt))
+                        .labelsHidden()
+                    if hasStoredSecret {
+                        Button("Keep Saved") { enteredSecret = nil }
+                    }
+                }
+            }
         }
     }
 }
