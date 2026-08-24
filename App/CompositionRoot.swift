@@ -28,6 +28,7 @@ final class CompositionRoot {
         do {
             let vault = KeychainCredentialVault()
             let library = try GRDBMachineLibrary(path: Self.libraryPath())
+            let trustStore = try GRDBTrustStore(path: Self.trustStorePath())
             let store = MachineStore(library: library, vault: vault)
             self.store = store
 
@@ -46,7 +47,7 @@ final class CompositionRoot {
                 prober: TCPAddressProber(),
                 driver: driver,
                 vncDriver: RoyalVNCSessionDriver(vault: vault),
-                rdpDriver: FreeRDPSessionDriver(vault: vault))
+                rdpDriver: FreeRDPSessionDriver(vault: vault, trustStore: trustStore))
         } catch {
             startupError = error.localizedDescription
         }
@@ -110,6 +111,16 @@ final class CompositionRoot {
         }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return support.appendingPathComponent("Constellation/library.sqlite").path
+    }
+
+    /// The Trust Store's own database, beside the library.
+    /// `CONSTELLATION_TRUST_STORE_PATH` overrides it for development runs.
+    private static func trustStorePath() -> String {
+        if let override = ProcessInfo.processInfo.environment["CONSTELLATION_TRUST_STORE_PATH"], !override.isEmpty {
+            return override
+        }
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return support.appendingPathComponent("Constellation/trust.sqlite").path
     }
 }
 

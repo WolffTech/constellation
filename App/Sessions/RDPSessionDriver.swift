@@ -26,15 +26,18 @@ protocol RDPSessionDriving: AnyObject {
 @MainActor
 final class FreeRDPSessionDriver: RDPSessionDriving {
     private let vault: any CredentialVault
+    private let trustStore: any TrustStore
     private let credentialPrompt: @MainActor (RDPCredentialPrompt) -> RDPCredentialEntry?
-    private let certificatePrompt: @MainActor (RDPCertificate, String) -> RDPCertificateVerdict
+    private let certificatePrompt: @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision
 
     init(
         vault: any CredentialVault,
+        trustStore: any TrustStore,
         credentialPrompt: @escaping @MainActor (RDPCredentialPrompt) -> RDPCredentialEntry? = RDPCredentialPrompter.ask,
-        certificatePrompt: @escaping @MainActor (RDPCertificate, String) -> RDPCertificateVerdict = RDPCertificatePrompter.ask
+        certificatePrompt: @escaping @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision = RDPCertificatePrompter.ask
     ) {
         self.vault = vault
+        self.trustStore = trustStore
         self.credentialPrompt = credentialPrompt
         self.certificatePrompt = certificatePrompt
     }
@@ -63,12 +66,58 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
             domain: domain.isEmpty ? nil : domain,
             sharesClipboard: request.sharesClipboard)
         let certificatePrompt = self.certificatePrompt
+        let trustStore = self.trustStore
         let machineName = request.machineName
         return RDPSession(
             configuration: configuration,
             password: { password },
-            verifyCertificate: { certificate in certificatePrompt(certificate, machineName) })
+            verifyCertificate: { certificate in
+                await resolveCertificate(certificate, machineName: machineName, trustStore: trustStore, prompt: certificatePrompt)
+            })
     }
+}
+
+/// Trust-on-first-use for a presented certificate: a certificate whose
+/// fingerprint the store already trusts connects silently; anything else
+/// prompts, and "Always Trust" records the decision for next time. Returning
+/// `.acceptOnce` to FreeRDP for every accept keeps the store the single source
+/// of trust rather than FreeRDP's own known-hosts file.
+@MainActor
+func resolveCertificate(
+    _ certificate: RDPCertificate,
+    machineName: String,
+    trustStore: any TrustStore,
+    prompt: @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision
+) async -> RDPCertificateVerdict {
+    let stored = try? await trustStore.trusted(host: certificate.host, port: certificate.port)
+    if let stored, stored.matches(fingerprint: certificate.fingerprint) {
+        return .acceptOnce
+    }
+    // A stored-but-different fingerprint is a changed certificate even if
+    // FreeRDP (which never records ours) does not flag it.
+    let changed = certificate.changed || stored != nil
+    switch prompt(certificate, machineName, changed) {
+    case .reject:
+        return .reject
+    case .connectOnce:
+        return .acceptOnce
+    case .trustAlways:
+        try? await trustStore.trust(TrustedCertificate(
+            host: certificate.host,
+            port: certificate.port,
+            fingerprint: certificate.fingerprint,
+            subject: certificate.subject,
+            issuer: certificate.issuer,
+            commonName: certificate.commonName))
+        return .acceptOnce
+    }
+}
+
+/// What the user chose when shown an unverified certificate.
+enum RDPTrustDecision: Equatable, Sendable {
+    case connectOnce
+    case trustAlways
+    case reject
 }
 
 enum RDPSessionDriverError: Error, LocalizedError {
@@ -136,15 +185,16 @@ enum RDPCredentialPrompter {
     }
 }
 
-/// Native dialog for a server certificate FreeRDP cannot verify. Accepts for
-/// this session only; a Trust Store that remembers decisions comes later, and
-/// nothing is written to FreeRDP's own known-hosts file.
+/// Native dialog for a server certificate FreeRDP cannot verify. "Always Trust"
+/// records the decision in the Trust Store; "Connect Once" accepts only this
+/// session. `changed` is true when the store already trusts a different
+/// certificate for this server.
 @MainActor
 enum RDPCertificatePrompter {
-    static func ask(_ certificate: RDPCertificate, machineName: String) -> RDPCertificateVerdict {
+    static func ask(_ certificate: RDPCertificate, machineName: String, changed: Bool) -> RDPTrustDecision {
         let alert = NSAlert()
-        alert.alertStyle = certificate.changed ? .critical : .warning
-        alert.messageText = certificate.changed
+        alert.alertStyle = changed ? .critical : .warning
+        alert.messageText = changed
             ? "The certificate for \(machineName) has changed"
             : "Verify the identity of \(machineName)"
         var lines = [
@@ -158,13 +208,20 @@ enum RDPCertificatePrompter {
             lines.append("")
             lines.append("The certificate was issued for \(certificate.commonName), not \(certificate.host).")
         }
-        if certificate.changed {
+        if changed {
             lines.append("")
-            lines.append("A different certificate was seen before. Continue only if you expected the server to change.")
+            lines.append("A different certificate was trusted before. Continue only if you expected the server to change.")
         }
         alert.informativeText = lines.joined(separator: "\n")
-        alert.addButton(withTitle: "Connect")
+        // Connect Once is the default; Always Trust must be a deliberate choice,
+        // especially when the certificate has changed.
+        alert.addButton(withTitle: "Connect Once")
+        alert.addButton(withTitle: "Always Trust")
         alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn ? .acceptOnce : .reject
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .connectOnce
+        case .alertSecondButtonReturn: return .trustAlways
+        default: return .reject
+        }
     }
 }
