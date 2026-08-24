@@ -46,11 +46,31 @@ targets:
     postBuildScripts:
       - name: Embed constellation-askpass
         script: |
-          cp -f "${BUILT_PRODUCTS_DIR}/constellation-askpass" "${TARGET_BUILD_DIR}/${EXECUTABLE_FOLDER_PATH}/constellation-askpass"
+          helper_destination="${TARGET_BUILD_DIR}/${EXECUTABLE_FOLDER_PATH}/constellation-askpass"
+          cp -f "${BUILT_PRODUCTS_DIR}/constellation-askpass" "${helper_destination}"
+          if [ "${CODE_SIGNING_ALLOWED}" != "NO" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY}" ]; then
+            /usr/bin/codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --options runtime --timestamp=none "${helper_destination}"
+          fi
         inputFiles:
           - $(BUILT_PRODUCTS_DIR)/constellation-askpass
         outputFiles:
           - $(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/constellation-askpass
+      # libghostty finds themes and terminfo by climbing from the executable to
+      # Contents/Resources, so the zig build's share directory ships in the bundle.
+      - name: Embed Ghostty resources
+        script: |
+          share="${SRCROOT}/Vendor/ghostty/zig-out/share"
+          resources="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
+          if [ ! -d "${share}/ghostty" ]; then
+            echo "error: ${share}/ghostty is missing; run Scripts/build-libghostty.sh" >&2
+            exit 1
+          fi
+          mkdir -p "${resources}"
+          rm -rf "${resources}/ghostty" "${resources}/terminfo"
+          /usr/bin/ditto "${share}/ghostty" "${resources}/ghostty"
+          /usr/bin/ditto "${share}/terminfo" "${resources}/terminfo"
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ghostty/themes
     info:
       path: App/Info.plist
       properties:

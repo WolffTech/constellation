@@ -3,45 +3,80 @@ import ConstellationCore
 import SwiftUI
 
 struct MachineEditorView: View {
-    @State var draft: MachineDraft
+    @State private var draft: MachineDraft
+    /// What the sheet opened with, so Cancel can tell whether anything changed.
+    private let original: MachineDraft
     let store: MachineStore
     let onSaved: (MachineID) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var saving = false
+    @State private var confirmingDiscard = false
+    @FocusState private var nameFocused: Bool
+
+    init(draft: MachineDraft, store: MachineStore, onSaved: @escaping (MachineID) -> Void) {
+        _draft = State(initialValue: draft)
+        original = draft
+        self.store = store
+        self.onSaved = onSaved
+    }
+
+    private var hasChanges: Bool { draft != original }
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "server.rack")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(draft.isNew ? "Add Machine" : "Edit Machine")
+                        .font(.title2.bold())
+                    Text("Define how Constellation finds and connects to this machine.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+            .padding(.bottom, 14)
+
+            Divider()
+
             Form {
                 Section("Machine") {
-                    TextField("Name", text: $draft.machine.name)
-                    TextField("Tags (comma separated)", text: $draft.tagsText)
+                    TextField("Name", text: $draft.machine.name, prompt: Text("Machine name"))
+                        .focused($nameFocused)
+                    TextField("Tags", text: $draft.tagsText, prompt: Text("Comma separated"))
                     Toggle("Favorite", isOn: $draft.machine.isFavorite)
-                    TextField("Notes", text: $draft.machine.notes, axis: .vertical)
+                    TextField("Notes", text: $draft.machine.notes, prompt: Text("Optional notes"), axis: .vertical)
                         .lineLimit(2...5)
                 }
 
+                ForEach($draft.addresses) { $address in
+                    AddressSection(address: $address) { draft.removeAddress(address.id) }
+                }
                 Section {
-                    ForEach($draft.addresses) { $address in
-                        AddressRow(address: $address) { draft.removeAddress(address.id) }
+                    Button { draft.addAddress() } label: {
+                        Label("Add Address", systemImage: "plus")
                     }
-                    Button("Add Address") { draft.addAddress() }
-                } header: {
-                    Text("Addresses")
                 } footer: {
-                    Text("Tried in this order when a profile uses automatic selection.")
+                    Text("Addresses are tried in this order when a profile uses automatic selection.")
                 }
 
-                Section("SSH Profiles") {
-                    ForEach($draft.profiles) { $profile in
-                        SSHProfileEditor(
-                            draft: $profile,
-                            addresses: draft.addresses,
-                            isDefault: draft.machine.defaultProfileID == profile.id,
-                            onMakeDefault: { draft.machine.defaultProfileID = profile.id },
-                            onRemove: { draft.removeProfile(profile.id) })
+                ForEach($draft.profiles) { $profile in
+                    SSHProfileSection(
+                        draft: $profile,
+                        addresses: draft.addresses,
+                        isDefault: draft.machine.defaultProfileID == profile.id,
+                        onMakeDefault: { draft.machine.defaultProfileID = profile.id },
+                        onRemove: { draft.removeProfile(profile.id) })
+                }
+                Section {
+                    Button { draft.addProfile() } label: {
+                        Label("Add SSH Profile", systemImage: "plus")
                     }
-                    Button("Add Profile") { draft.addProfile() }
                 }
             }
             .formStyle(.grouped)
@@ -49,19 +84,37 @@ struct MachineEditorView: View {
             Divider()
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Cancel", action: cancel)
                     .keyboardShortcut(.cancelAction)
                 Button(draft.isNew ? "Add Machine" : "Save") { Task { await save() } }
                     .keyboardShortcut(.defaultAction)
                     .disabled(saving)
             }
             .padding()
+            .background(.bar)
         }
-        .frame(minWidth: 600, idealWidth: 640, minHeight: 560)
+        .frame(minWidth: 680, idealWidth: 720, minHeight: 620, idealHeight: 700)
+        .interactiveDismissDisabled(saving || hasChanges)
+        .defaultFocus($nameFocused, true)
+        .onAppear { nameFocused = true }
+        .confirmationDialog("Discard changes?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
+            Button("Discard Changes", role: .destructive) { dismiss() }
+            Button("Keep Editing", role: .cancel) {}
+        } message: {
+            Text("This machine has unsaved edits.")
+        }
         .alert("Couldn’t Save", isPresented: Binding(get: { store.presentedError != nil }, set: { if !$0 { store.presentedError = nil } })) {
             Button("OK") {}
         } message: {
             Text(store.presentedError ?? "")
+        }
+    }
+
+    private func cancel() {
+        if hasChanges {
+            confirmingDiscard = true
+        } else {
+            dismiss()
         }
     }
 
@@ -75,31 +128,32 @@ struct MachineEditorView: View {
     }
 }
 
-private struct AddressRow: View {
+private struct AddressSection: View {
     @Binding var address: MachineAddress
     let onRemove: () -> Void
 
     var body: some View {
-        HStack {
-            TextField("Label", text: $address.label)
-                .frame(width: 110)
-            TextField("Hostname or IP", text: $address.host)
-                .monospaced()
-            Picker("Kind", selection: $address.kind) {
+        Section {
+            TextField("Label", text: $address.label, prompt: Text("Optional, such as Home or Office"))
+            TextField("Hostname or IP", text: $address.host, prompt: Text("server.example.com"))
+            Picker("Network", selection: $address.kind) {
                 ForEach(AddressKind.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
-            .labelsHidden()
-            .frame(width: 110)
-            Button(role: .destructive, action: onRemove) {
-                Image(systemName: "minus.circle")
+        } header: {
+            HStack {
+                Label(address.displayLabel, systemImage: "network")
+                Spacer()
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Remove address")
             }
-            .buttonStyle(.borderless)
-            .help("Remove address")
         }
     }
 }
 
-private struct SSHProfileEditor: View {
+private struct SSHProfileSection: View {
     @Binding var draft: SSHProfileDraft
     let addresses: [MachineAddress]
     let isDefault: Bool
@@ -107,45 +161,52 @@ private struct SSHProfileEditor: View {
     let onRemove: () -> Void
 
     var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    TextField("Profile name", text: $draft.profile.name)
-                    if isDefault {
-                        Text("default").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Button("Make Default", action: onMakeDefault).controlSize(.small)
-                    }
-                    Button(role: .destructive, action: onRemove) { Image(systemName: "minus.circle") }
-                        .buttonStyle(.borderless)
-                        .help("Remove profile")
+        Section {
+            TextField("Profile name", text: $draft.profile.name, prompt: Text("SSH"))
+            TextField("Username", text: username, prompt: Text("Optional"))
+            TextField("Port", value: $draft.profile.port, format: .number.grouping(.never), prompt: Text("22"))
+            Picker("Address", selection: $draft.profile.addressSelection) {
+                Text("Automatic (first reachable)").tag(AddressSelection.automatic)
+                ForEach(addresses) { address in
+                    Text("\(address.label) — \(address.host)").tag(AddressSelection.pinned(address.id))
                 }
-                HStack {
-                    TextField("Username", text: username)
-                    Text("Port")
-                    TextField("Port", value: $draft.profile.port, format: .number.grouping(.never))
-                        .frame(width: 70)
-                }
-                Picker("Address", selection: $draft.profile.addressSelection) {
-                    Text("Automatic (first reachable)").tag(AddressSelection.automatic)
-                    ForEach(addresses) { address in
-                        Text("\(address.label) — \(address.host)").tag(AddressSelection.pinned(address.id))
-                    }
-                }
-                Picker("Authentication", selection: $draft.authMode) {
-                    ForEach(SSHProfileDraft.AuthMode.allCases) { Text($0.label).tag($0) }
-                }
-                if draft.authMode == .keyFile {
+            }
+            Picker("Authentication", selection: $draft.authMode) {
+                ForEach(SSHProfileDraft.AuthMode.allCases) { Text($0.label).tag($0) }
+            }
+            if draft.authMode == .keyFile {
+                LabeledContent("Private key") {
                     HStack {
-                        TextField("Private key file", text: $draft.keyFilePath).monospaced()
+                        TextField("Private key", text: $draft.keyFilePath, prompt: Text("Path to private key"))
+                            .labelsHidden()
                         Button("Choose…") { chooseKeyFile() }
                     }
                 }
-                if draft.needsSecret {
-                    secretRow
-                }
             }
-            .padding(4)
+            if draft.needsSecret {
+                secretRow
+            }
+        } header: {
+            HStack(spacing: 8) {
+                Label(draft.profile.name.isEmpty ? "SSH Profile" : draft.profile.name, systemImage: "terminal")
+                if isDefault {
+                    Text("Default")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
+                } else {
+                    Button("Make Default", action: onMakeDefault)
+                        .controlSize(.small)
+                }
+                Spacer()
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Remove profile")
+            }
         }
     }
 
@@ -153,17 +214,22 @@ private struct SSHProfileEditor: View {
     private var secretRow: some View {
         let title = draft.authMode == .password ? "Password" : "Key passphrase"
         if draft.hasStoredSecret, draft.enteredSecret == nil {
-            HStack {
-                Label("\(title) saved in Keychain", systemImage: "key.fill")
-                Spacer()
-                Button("Replace…") { draft.enteredSecret = "" }
-                Button("Remove") { draft.removeStoredSecret() }
+            LabeledContent(title) {
+                HStack {
+                    Label("\(title) saved in Keychain", systemImage: "key.fill")
+                    Spacer()
+                    Button("Replace…") { draft.enteredSecret = "" }
+                    Button("Remove") { draft.removeStoredSecret() }
+                }
             }
         } else {
-            HStack {
-                SecureField(draft.authMode == .password ? "Password" : "Key passphrase (leave empty if none)", text: secret)
-                if draft.hasStoredSecret {
-                    Button("Keep Saved") { draft.enteredSecret = nil }
+            LabeledContent(title) {
+                HStack {
+                    SecureField(title, text: secret, prompt: Text(draft.authMode == .password ? "Password" : "Leave empty if the key has none"))
+                        .labelsHidden()
+                    if draft.hasStoredSecret {
+                        Button("Keep Saved") { draft.enteredSecret = nil }
+                    }
                 }
             }
         }

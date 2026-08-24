@@ -4,7 +4,7 @@ import Foundation
 /// Everything the editor works on for one machine. Built from the snapshot,
 /// edited freely, then turned into a single batch change plus the secrets to
 /// write to the vault.
-struct MachineDraft {
+struct MachineDraft: Equatable {
     struct PendingSecret {
         var credentialID: CredentialID
         var secret: Secret
@@ -23,7 +23,7 @@ struct MachineDraft {
         let machine = Machine(name: name)
         self.machine = machine
         tagsText = ""
-        addresses = [MachineAddress(machineID: machine.id, label: "LAN", host: "")]
+        addresses = [MachineAddress(machineID: machine.id, label: "", host: "")]
         profiles = [SSHProfileDraft(profile: SSHProfile(machineID: machine.id))]
         isNew = true
     }
@@ -105,7 +105,7 @@ struct MachineDraft {
 
 /// One SSH profile under edit. A typed secret becomes a vault item on save;
 /// an existing secret is never shown, only replaced or removed.
-struct SSHProfileDraft: Identifiable {
+struct SSHProfileDraft: Identifiable, Equatable {
     enum AuthMode: String, CaseIterable, Identifiable {
         case agent, keyFile, password
         var id: String { rawValue }
