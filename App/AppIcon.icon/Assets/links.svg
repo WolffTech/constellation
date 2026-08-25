@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Flat source artwork for Icon Composer. Optical effects (glass, shadow,
+  translucency) belong in the AppIcon.icon document, not in this SVG.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <path fill="#9AA4F0" d="M473.0,528.1 L692.3,319.7 L683.4,310.2 L464.0,518.7 Z"/>
+  <path fill="#9AA4F0" d="M480.0,579.1 L755.4,647.6 L758.5,635.0 L483.1,566.5 Z"/>
+  <path fill="#9AA4F0" d="M411.8,509.7 L309.6,308.3 L298.0,314.2 L400.2,515.6 Z"/>
+  <path fill="#9AA4F0" d="M448.3,610.3 L539.6,790.1 L551.2,784.2 L459.8,604.4 Z"/>
+  <path fill="#9AA4F0" d="M389.0,594.3 L236.8,757.1 L246.3,766.0 L398.5,603.2 Z"/>
+  <path fill="#9AA4F0" d="M712.2,325.9 L772.1,621.9 L784.8,619.4 L725.0,323.4 Z"/>
+  <path fill="#9AA4F0" d="M318.0,294.7 L678.6,298.2 L678.8,285.2 L318.2,281.7 Z"/>
+</svg>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Flat source artwork for Icon Composer. Optical effects (glass, shadow,
+  translucency) belong in the AppIcon.icon document, not in this SVG.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <path fill="#FFFFFF" d="M430,442 Q430,560 548,560 Q430,560 430,678 Q430,560 312,560 Q430,560 430,442 Z"/>
+  <path fill="#FFFFFF" d="M712,218 Q712,292 786,292 Q712,292 712,366 Q712,292 638,292 Q712,292 712,218 Z"/>
+  <path fill="#FFFFFF" d="M784,586 Q784,648 846,648 Q784,648 784,710 Q784,648 722,648 Q784,648 784,586 Z"/>
+  <path fill="#FFFFFF" d="M292,230 Q292,288 350,288 Q292,288 292,346 Q292,288 234,288 Q292,288 292,230 Z"/>
+  <path fill="#FFFFFF" d="M556,756 Q556,808 608,808 Q556,808 556,860 Q556,808 504,808 Q556,808 556,756 Z"/>
+  <path fill="#FFFFFF" d="M228,732 Q228,776 272,776 Q228,776 228,820 Q228,776 184,776 Q228,776 228,732 Z"/>
+  <circle fill="#C9D0FF" cx="160" cy="420" r="11"/>
+  <circle fill="#C9D0FF" cx="600" cy="190" r="9"/>
+  <circle fill="#C9D0FF" cx="860" cy="470" r="12"/>
+  <circle fill="#C9D0FF" cx="820" cy="860" r="8"/>
+  <circle fill="#C9D0FF" cx="380" cy="150" r="8"/>
+  <circle fill="#C9D0FF" cx="700" cy="520" r="7"/>
+  <circle fill="#C9D0FF" cx="150" cy="600" r="7"/>
+</svg>

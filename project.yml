@@ -94,6 +94,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: tech.wolff.Constellation
         PRODUCT_NAME: Constellation
+        # App/AppIcon.icon is an Icon Composer document; actool also emits the
+        # .icns fallback for macOS 15.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # libghostty's static library pulls in C++ (harfbuzz, freetype).
         OTHER_LDFLAGS: ["-lc++"]
   ConstellationTests:

@@ -1,0 +1,48 @@
+{
+  "fill": {
+    "automatic-gradient": "srgb:0.10980,0.12157,0.36078,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "stars.svg",
+          "name": "Stars"
+        }
+      ],
+      "name": "Stars",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.4
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.18
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "links.svg",
+          "name": "Links"
+        }
+      ],
+      "name": "Links",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.25
+      },
+      "specular": false,
+      "translucency": {
+        "enabled": true,
+        "value": 0.35
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}
