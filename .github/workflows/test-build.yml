@@ -1,0 +1,72 @@
+name: Test Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build downloadable test app
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - name: Show toolchain versions
+        run: |
+          xcodebuild -version
+          swift --version
+          test "$(uname -m)" = arm64
+
+      - name: Build native libraries
+        uses: ./.github/actions/native-libraries
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Run app and core tests
+        run: |
+          xcodebuild -project Constellation.xcodeproj -scheme Constellation \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      # Ad-hoc signed: it runs after right-click > Open, but it is not
+      # notarized and Keychain items it creates are tied to this build.
+      - name: Build ad-hoc signed app
+        run: |
+          xcodebuild -project Constellation.xcodeproj -scheme Constellation \
+            -configuration Release \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION="0.0.0-test" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            build
+          app="build/DerivedData/Build/Products/Release/Constellation.app"
+          codesign --force --deep --sign - --options runtime "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          mkdir -p dist
+          ditto -c -k --keepParent "$app" "dist/Constellation-test-build.zip"
+
+      - name: Upload test build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Constellation-arm64-${{ github.run_number }}
+          path: dist/Constellation-test-build.zip
+          if-no-files-found: error
+          retention-days: 14

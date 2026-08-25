@@ -1,0 +1,94 @@
+name: PR Checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Cancel superseded runs on PRs, but let every push to main finish so each
+  # commit on main keeps its validation result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  workflow-lint:
+    name: Lint workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          curl --fail --location --silent --show-error \
+            --output "$RUNNER_TEMP/actionlint.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+
+      - name: Check workflow files
+        run: |
+          "$RUNNER_TEMP/actionlint" -color
+
+  test:
+    name: Build and test
+    runs-on: macos-26
+    # The first run on a new submodule pin builds libghostty and FreeRDP from
+    # source; later runs restore both from the cache.
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - name: Show toolchain versions
+        run: |
+          xcodebuild -version
+          swift --version
+          test "$(uname -m)" = arm64
+
+      - name: Build native libraries
+        uses: ./.github/actions/native-libraries
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Run app and core tests
+        run: |
+          xcodebuild -project Constellation.xcodeproj -scheme Constellation \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      # Not part of the Xcode scheme; the terminal suite opens real surfaces
+      # and needs the runner's window server. Network suites skip themselves
+      # unless CONSTELLATION_TEST_* variables point at a live host.
+      - name: Run package tests
+        run: |
+          for package in ConstellationInfrastructure ConstellationRemoteDesktop ConstellationTerminal; do
+            echo "::group::$package"
+            swift test --package-path "Packages/$package"
+            echo "::endgroup::"
+          done

@@ -1,0 +1,70 @@
+name: Native libraries
+description: >-
+  Restore GhosttyKit.xcframework and FreeRDPKit.xcframework from the cache, or
+  build them from the pinned submodules with Scripts/build-libghostty.sh and
+  Scripts/build-freerdp.sh.
+
+inputs:
+  use-cache:
+    description: >-
+      Restore and save the built xcframeworks. Release builds pass "false" so
+      they always link the OpenSSL that Homebrew currently ships.
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Compute cache keys
+      id: keys
+      shell: bash
+      run: |
+        {
+          echo "ghostty=$(git rev-parse HEAD:Vendor/ghostty)"
+          echo "freerdp=$(git rev-parse HEAD:Vendor/freerdp)"
+          echo "xcode=$(xcodebuild -version | head -1 | tr ' ' '-')"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Restore GhosttyKit
+      id: ghostty
+      if: inputs.use-cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          Vendor/ghostty/macos/GhosttyKit.xcframework
+          Vendor/ghostty/zig-out/share
+        key: ghostty-${{ runner.arch }}-${{ steps.keys.outputs.xcode }}-${{ steps.keys.outputs.ghostty }}-${{ hashFiles('Scripts/build-libghostty.sh') }}
+
+    - name: Install Metal toolchain
+      if: steps.ghostty.outputs.cache-hit != 'true'
+      shell: bash
+      run: xcodebuild -downloadComponent MetalToolchain
+
+    - name: Build libghostty
+      if: steps.ghostty.outputs.cache-hit != 'true'
+      shell: bash
+      run: Scripts/build-libghostty.sh
+
+    - name: Restore FreeRDPKit
+      id: freerdp
+      if: inputs.use-cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: Vendor/build/freerdp
+        key: freerdp-${{ runner.arch }}-${{ steps.keys.outputs.xcode }}-${{ steps.keys.outputs.freerdp }}-${{ hashFiles('Scripts/build-freerdp.sh') }}
+
+    - name: Build FreeRDP
+      if: steps.freerdp.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        HOMEBREW_NO_AUTO_UPDATE: "1"
+        HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      run: |
+        brew install cmake openssl@3
+        Scripts/build-freerdp.sh
+
+    - name: Check xcframeworks
+      shell: bash
+      run: |
+        test -f Packages/ConstellationTerminal/GhosttyKit.xcframework/Info.plist
+        test -f Packages/ConstellationRemoteDesktop/FreeRDPKit.xcframework/Info.plist
+        test -d Vendor/ghostty/zig-out/share/ghostty

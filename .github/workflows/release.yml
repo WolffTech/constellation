@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    name: Build, notarize, and publish
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+    steps:
+      - name: Check release credentials
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          missing=0
+          for name in MACOS_CERT_P12 MACOS_CERT_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::missing repository secret: $name"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+          # Full history: the build number is the commit count on the tag.
+          fetch-depth: 0
+
+      - name: Show toolchain versions
+        run: |
+          xcodebuild -version
+          swift --version
+          test "$(uname -m)" = arm64
+
+      - name: Derive version from tag
+        run: |
+          {
+            echo "APP_VERSION=${GITHUB_REF_NAME#v}"
+            echo "BUILD_NUMBER=$(git rev-list --count HEAD)"
+          } >> "$GITHUB_ENV"
+
+      # No cache: a release links whatever OpenSSL Homebrew ships today.
+      - name: Build native libraries
+        uses: ./.github/actions/native-libraries
+        with:
+          use-cache: "false"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Run app and core tests
+        run: |
+          xcodebuild -project Constellation.xcodeproj -scheme Constellation \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Import Developer ID certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -f pkcs12 -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+
+      - name: Build, sign, notarize, and staple
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          NOTARY_KEY_FILE="$RUNNER_TEMP/notary-key.p8"
+          printf '%s\n' "$NOTARY_KEY_P8" > "$NOTARY_KEY_FILE"
+          trap 'rm -f "$NOTARY_KEY_FILE"' EXIT
+          export NOTARY_KEY_FILE
+          Scripts/release.sh "$APP_VERSION" "$BUILD_NUMBER"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ZIP="build/release/$APP_VERSION/Constellation-$APP_VERSION.zip"
+          # A tag created through the GitHub release UI already has a release;
+          # attach the artifacts to it. A plain pushed tag gets a new release.
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$ZIP" "$ZIP.sha256" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "Constellation $APP_VERSION" \
+              --generate-notes \
+              --verify-tag \
+              "$ZIP" "$ZIP.sha256"
+          fi
+
+      - name: Remove signing keychain
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/release.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/release.keychain-db"
+          fi
