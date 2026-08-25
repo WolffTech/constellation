@@ -83,6 +83,7 @@ enum VNCCredentialPrompter {
         let width: CGFloat = 280
         let password = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: width, height: 24))
         password.placeholderString = "Password"
+        password.setAccessibilityLabel("Password")
         var username: NSTextField?
         switch prompt.kind {
         case .password:
@@ -91,10 +92,15 @@ enum VNCCredentialPrompter {
         case .usernameAndPassword:
             let user = NSTextField(frame: NSRect(x: 0, y: 30, width: width, height: 24))
             user.placeholderString = "Username"
+            user.setAccessibilityLabel("Username")
             user.stringValue = prompt.username ?? ""
             let stack = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 54))
+            stack.setAccessibilityRole(.group)
+            stack.setAccessibilityLabel("Credentials")
             stack.addSubview(user)
             stack.addSubview(password)
+            user.nextKeyView = password
+            password.nextKeyView = user
             alert.accessoryView = stack
             alert.window.initialFirstResponder = user.stringValue.isEmpty ? user : password
             username = user

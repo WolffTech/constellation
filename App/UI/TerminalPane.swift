@@ -14,7 +14,9 @@ struct TerminalPane: View {
         VStack(spacing: 0) {
             if isSearchPresented {
                 HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     TextField("Find", text: $query)
                         .textFieldStyle(.roundedBorder)
                         .focused($searchFocused)
@@ -26,12 +28,15 @@ struct TerminalPane: View {
                     Button { navigate("previous") } label: { Image(systemName: "chevron.up") }
                         .buttonStyle(.borderless)
                         .help("Previous Match")
+                        .accessibilityLabel("Previous Match")
                     Button { navigate("next") } label: { Image(systemName: "chevron.down") }
                         .buttonStyle(.borderless)
                         .help("Next Match")
+                        .accessibilityLabel("Next Match")
                     Button { isSearchPresented = false } label: { Image(systemName: "xmark") }
                         .buttonStyle(.borderless)
                         .help("Close Find (Escape)")
+                        .accessibilityLabel("Close Find")
                 }
                 .padding(8)
                 .background(.bar)
@@ -45,11 +50,14 @@ struct TerminalPane: View {
                                 .font(.callout)
                             Button("Reconnect", action: onReconnect)
                                 .controlSize(.small)
+                                .keyboardShortcut(.defaultAction)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(.regularMaterial, in: Capsule())
                         .padding(.top, 8)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityAddTraits(.updatesFrequently)
                     }
                 }
         }

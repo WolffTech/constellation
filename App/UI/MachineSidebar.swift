@@ -158,12 +158,14 @@ struct MachineSidebar: View {
     @ViewBuilder
     private func badge(_ count: Int) -> some View {
         if count > 0 {
+            let description = "\(count) active \(count == 1 ? "session" : "sessions")"
             Text("\(count)")
                 .font(.caption.monospacedDigit())
                 .padding(.horizontal, 6)
                 .padding(.vertical, 1)
                 .background(Capsule().fill(Color.green.opacity(0.3)))
-                .help("\(count) active \(count == 1 ? "session" : "sessions")")
+                .help(description)
+                .accessibilityLabel(description)
         }
     }
 

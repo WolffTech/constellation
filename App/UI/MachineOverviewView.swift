@@ -46,6 +46,7 @@ private struct SessionTabBar: View {
                         .buttonStyle(.borderless)
                         .padding(.horizontal, 8)
                         .help("Quick Connect (⌘K)")
+                        .accessibilityLabel("Quick Connect")
                 }
                 .padding(.horizontal, 7)
                 .padding(.vertical, 4)
@@ -53,6 +54,8 @@ private struct SessionTabBar: View {
             .frame(height: 38)
             .scrollIndicators(.hidden)
             .background(.bar)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Sessions")
             .onChange(of: sessions.selectedSessionID, initial: true) { _, id in
                 if let id { proxy.scrollTo(id) }
             }
@@ -83,7 +86,9 @@ private struct SessionTab: View {
             }
             .buttonStyle(.borderless)
             .help("Close Session")
+            .accessibilityLabel("Close \(session.title)")
             .opacity(hovering || isSelected ? 1 : 0)
+            .accessibilityHidden(!(hovering || isSelected))
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
@@ -110,6 +115,8 @@ private struct SessionTab: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(session.title), \(session.state.displayName)")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { sessions.select(session.id) }
     }
 
     private var helpText: String {
@@ -295,6 +302,7 @@ struct MachineOverviewView: View {
                                         .frame(width: 8, height: 8)
                                     Text(session.title)
                                 }
+                                .accessibilityElement(children: .combine)
                                 Text("\(session.profileName) · \(session.state.displayName)")
                             }
                         }
@@ -331,12 +339,15 @@ struct MachineOverviewView: View {
                                         Image(systemName: "macwindow.on.rectangle")
                                     }
                                     .help("Open in Apple’s Screen Sharing app")
+                                    .accessibilityLabel("Open in Screen Sharing")
                                 }
                                 Button("Connect") { connect(profile.id) }
                             }
                         } label: {
                             HStack(spacing: 7) {
-                                Image(systemName: profile.protocolKind.symbolName).foregroundStyle(.secondary)
+                                Image(systemName: profile.protocolKind.symbolName)
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityHidden(true)
                                 Text(profile.name)
                                 if machine.defaultProfileID == profile.id {
                                     Text("Default")
@@ -379,6 +390,7 @@ struct MachineOverviewView: View {
                     }
                     .buttonStyle(.plain)
                     .help(machine.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+                    .accessibilityLabel(machine.isFavorite ? "Remove from Favorites" : "Add to Favorites")
                 }
                 if !machine.notes.isEmpty {
                     Text(machine.notes)
@@ -458,7 +470,9 @@ struct MachineOverviewView: View {
     private func reachability(for address: MachineAddress) -> some View {
         switch probes[address.id] {
         case .checking:
-            ProgressView().controlSize(.small)
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityLabel("Checking reachability")
         case .reachable:
             Label("Reachable", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
@@ -515,18 +529,24 @@ private struct RemoteDesktopPane: View {
                     }
                     .padding(20)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.updatesFrequently)
                 }
             }
             .overlay(alignment: .top) {
                 if !state.hasLiveProcess {
                     HStack(spacing: 10) {
                         Text(statusText).font(.callout)
-                        Button("Reconnect", action: onReconnect).controlSize(.small)
+                        Button("Reconnect", action: onReconnect)
+                            .controlSize(.small)
+                            .keyboardShortcut(.defaultAction)
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(.regularMaterial, in: Capsule())
                     .padding(.top, 8)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.updatesFrequently)
                 }
             }
             .onAppear { session.focus() }

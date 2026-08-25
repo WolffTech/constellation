@@ -38,6 +38,11 @@ final class RDPHostView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    override func accessibilityRole() -> NSAccessibility.Role? { .group }
+    override func accessibilityLabel() -> String? {
+        displayMode == .fit ? "Remote desktop, fit to window" : "Remote desktop, actual size"
+    }
+
     /// The size a fitted desktop would have: the clip view's bounds.
     var fitSize: CGSize { scrollView.contentView.bounds.size }
 

@@ -96,6 +96,17 @@ public final class GhosttySurfaceView: NSView {
         }
     }
 
+    // MARK: Accessibility
+
+    // VoiceOver reads the viewport as a text area; libghostty draws into its
+    // own layer, so without this the terminal is silent.
+    public override func isAccessibilityElement() -> Bool { true }
+    public override func accessibilityRole() -> NSAccessibility.Role? { .textArea }
+    public override func accessibilityLabel() -> String? { "Terminal" }
+    public override func accessibilityValue() -> Any? { readText(.viewport) }
+    public override func accessibilitySelectedText() -> String? { selectionText() }
+    public override func accessibilitySelectedTextRange() -> NSRange { selectionRange() }
+
     func readText(_ region: TextRegion) -> String {
         guard let surface else { return "" }
         let tag = region == .viewport ? GHOSTTY_POINT_VIEWPORT : GHOSTTY_POINT_SCREEN

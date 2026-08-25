@@ -610,7 +610,21 @@ final class SessionCoordinator {
 
     private func update(_ sessionID: SessionID, _ change: (inout SessionSummary) -> Void) {
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        let before = sessions[index].state.displayName
         change(&sessions[index])
+        let session = sessions[index]
+        if session.id == selectedSessionID, session.state.displayName != before {
+            announce("\(session.title): \(session.state.displayName)")
+        }
+    }
+
+    /// VoiceOver announcement for state changes of the session on screen;
+    /// the tab and banners update visually but nothing else would speak.
+    private func announce(_ text: String) {
+        guard let app = NSApp else { return }
+        NSAccessibility.post(
+            element: app, notification: .announcementRequested,
+            userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
 
     private var workspaceTabs: [WorkspaceTab] {

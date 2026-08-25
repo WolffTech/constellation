@@ -41,6 +41,13 @@ final class RDPSurfaceView: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .image }
+    override func accessibilityLabel() -> String? { "Remote desktop" }
+    override func accessibilityHelp() -> String? {
+        "Shows the remote screen as an image. Keyboard and pointer input go to the remote computer."
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil { startDisplayLink() } else { stopDisplayLink() }

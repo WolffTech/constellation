@@ -70,6 +70,7 @@ struct MainSplitView: View {
             presenting: pendingDelete
         ) { machine in
             Button("Delete", role: .destructive) { Task { await delete(machine) } }
+                .keyboardShortcut(.defaultAction)
             Button("Cancel", role: .cancel) {}
         } message: { _ in
             Text("Its addresses and profiles are removed and any open session is closed.")
@@ -82,6 +83,7 @@ struct MainSplitView: View {
                 let credentials = orphanedCredentials
                 Task { await store.removeCredentials(credentials) }
             }
+            .keyboardShortcut(.defaultAction)
             Button("Keep", role: .cancel) {}
         } message: {
             Text("No profile uses:\n" + orphanedCredentials.map(\.label).joined(separator: "\n"))
@@ -93,17 +95,20 @@ struct MainSplitView: View {
                 set: { if !$0 { sessions.pendingClose = nil } })
         ) {
             Button(closeAlertAction, role: .destructive) { sessions.confirmPendingClose() }
+                .keyboardShortcut(.defaultAction)
             Button("Cancel", role: .cancel) { sessions.pendingClose = nil }
         } message: {
             Text(closeAlertMessage)
         }
         .alert("Couldn’t Update Library", isPresented: storeErrorPresented) {
             Button("OK") {}
+                .keyboardShortcut(.defaultAction)
         } message: {
             Text(store.presentedError ?? "")
         }
         .alert(sessions.presentedError?.title ?? "", isPresented: sessionErrorPresented) {
             Button("OK") {}
+                .keyboardShortcut(.defaultAction)
         } message: {
             Text(sessions.presentedError?.message ?? "")
         }

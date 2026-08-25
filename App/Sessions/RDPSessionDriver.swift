@@ -152,16 +152,20 @@ enum RDPCredentialPrompter {
         let width: CGFloat = 300
         let rows = prompt.hasStoredPassword ? 2 : 3
         let stack = NSView(frame: NSRect(x: 0, y: 0, width: width, height: CGFloat(rows) * 30 - 6))
+        stack.setAccessibilityRole(.group)
+        stack.setAccessibilityLabel("Credentials")
         var y = stack.frame.height - 24
 
         let user = NSTextField(frame: NSRect(x: 0, y: y, width: width, height: 24))
         user.placeholderString = "Username"
+        user.setAccessibilityLabel("Username")
         user.stringValue = prompt.username ?? ""
         stack.addSubview(user)
         y -= 30
 
         let domain = NSTextField(frame: NSRect(x: 0, y: y, width: width, height: 24))
         domain.placeholderString = "Domain (optional)"
+        domain.setAccessibilityLabel("Domain")
         domain.stringValue = prompt.domain ?? ""
         stack.addSubview(domain)
         y -= 30
@@ -170,9 +174,13 @@ enum RDPCredentialPrompter {
         if !prompt.hasStoredPassword {
             let field = NSSecureTextField(frame: NSRect(x: 0, y: y, width: width, height: 24))
             field.placeholderString = "Password"
+            field.setAccessibilityLabel("Password")
             stack.addSubview(field)
             password = field
         }
+        user.nextKeyView = domain
+        domain.nextKeyView = password ?? user
+        password?.nextKeyView = user
         alert.accessoryView = stack
         alert.window.initialFirstResponder = user.stringValue.isEmpty ? user : (password ?? user)
         alert.addButton(withTitle: "Connect")

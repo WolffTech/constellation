@@ -29,6 +29,7 @@ struct MachineEditorView: View {
                 Image(systemName: "server.rack")
                     .font(.title2)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(draft.isNew ? "Add Machine" : "Edit Machine")
                         .font(.title2.bold())
@@ -170,6 +171,7 @@ private struct AddressSection: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Remove address")
+                .accessibilityLabel("Remove \(address.displayLabel)")
             }
         }
     }
@@ -181,6 +183,8 @@ private struct SSHProfileSection: View {
     let isDefault: Bool
     let onMakeDefault: () -> Void
     let onRemove: () -> Void
+
+    private var title: String { draft.profile.name.isEmpty ? "SSH Profile" : draft.profile.name }
 
     var body: some View {
         Section {
@@ -210,7 +214,7 @@ private struct SSHProfileSection: View {
             }
         } header: {
             HStack(spacing: 8) {
-                Label(draft.profile.name.isEmpty ? "SSH Profile" : draft.profile.name, systemImage: "terminal")
+                Label(title, systemImage: "terminal")
                 if isDefault {
                     Text("Default")
                         .font(.caption)
@@ -228,6 +232,7 @@ private struct SSHProfileSection: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Remove profile")
+                .accessibilityLabel("Remove profile \(title)")
             }
         }
     }
@@ -267,6 +272,8 @@ private struct VNCProfileSection: View {
     let onMakeDefault: () -> Void
     let onRemove: () -> Void
 
+    private var title: String { draft.profile.name.isEmpty ? "VNC Profile" : draft.profile.name }
+
     var body: some View {
         Section {
             TextField("Profile name", text: $draft.profile.name, prompt: Text("VNC"))
@@ -287,7 +294,7 @@ private struct VNCProfileSection: View {
             Toggle("Share clipboard with the remote desktop", isOn: $draft.profile.sharesClipboard)
         } header: {
             HStack(spacing: 8) {
-                Label(draft.profile.name.isEmpty ? "VNC Profile" : draft.profile.name, systemImage: ConnectionProtocol.vnc.symbolName)
+                Label(title, systemImage: ConnectionProtocol.vnc.symbolName)
                 if isDefault {
                     Text("Default")
                         .font(.caption)
@@ -305,6 +312,7 @@ private struct VNCProfileSection: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Remove profile")
+                .accessibilityLabel("Remove profile \(title)")
             }
         } footer: {
             Label(
@@ -327,6 +335,8 @@ private struct RDPProfileSection: View {
     let onMakeDefault: () -> Void
     let onRemove: () -> Void
 
+    private var title: String { draft.profile.name.isEmpty ? "RDP Profile" : draft.profile.name }
+
     var body: some View {
         Section {
             TextField("Profile name", text: $draft.profile.name, prompt: Text("RDP"))
@@ -348,7 +358,7 @@ private struct RDPProfileSection: View {
             Toggle("Share clipboard text with the remote desktop", isOn: $draft.profile.sharesClipboard)
         } header: {
             HStack(spacing: 8) {
-                Label(draft.profile.name.isEmpty ? "RDP Profile" : draft.profile.name, systemImage: ConnectionProtocol.rdp.symbolName)
+                Label(title, systemImage: ConnectionProtocol.rdp.symbolName)
                 if isDefault {
                     Text("Default")
                         .font(.caption)
@@ -366,6 +376,7 @@ private struct RDPProfileSection: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Remove profile")
+                .accessibilityLabel("Remove profile \(title)")
             }
         } footer: {
             Text("Connects with Network Level Authentication over TLS. The server's certificate is shown for approval on first use.")

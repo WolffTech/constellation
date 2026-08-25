@@ -35,6 +35,11 @@ final class RemoteDesktopHostView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override func accessibilityRole() -> NSAccessibility.Role? { .group }
+    override func accessibilityLabel() -> String? {
+        displayMode == .fit ? "Remote desktop, fit to window" : "Remote desktop, actual size"
+    }
+
     func show(_ view: NSView, framebufferSize: CGSize) {
         self.framebufferSize = framebufferSize
         scrollView.documentView = view
