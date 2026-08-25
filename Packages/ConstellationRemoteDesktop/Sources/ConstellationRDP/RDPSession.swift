@@ -96,6 +96,12 @@ public final class RDPSession: RemoteDesktopSession {
         surface.window?.makeFirstResponder(surface)
     }
 
+    /// Frame updates received from the bridge and snapshots handed to Core
+    /// Animation so far. For profiling.
+    var frameStatistics: (updates: Int, snapshots: Int) {
+        (surface.updateCount, surface.snapshotCount)
+    }
+
     /// Asks the server for a new desktop size, in points; the display's backing
     /// scale turns it into pixels. A no-op unless dynamic resolution was
     /// negotiated and the session is connected.

@@ -25,6 +25,7 @@
 #include <freerdp/settings.h>
 
 #include <winpr/synch.h>
+#include <winpr/sysinfo.h>
 #include <winpr/thread.h>
 #include <winpr/input.h>
 #include <winpr/string.h>
@@ -652,6 +653,7 @@ static DWORD WINAPI crdp_client_thread(LPVOID param) {
     crdpContext *cctx = (crdpContext *)param;
     crdp_session *session = cctx->session;
     freerdp *instance = context->instance;
+    pthread_setname_np("constellation.rdp.client"); // visible in samples and Instruments
 
     if (!freerdp_connect(instance)) {
         crdp_failure failure = map_failure(freerdp_get_last_error(context));
@@ -667,6 +669,8 @@ static DWORD WINAPI crdp_client_thread(LPVOID param) {
     crdp_drain_commands(session);
 
     HANDLE handles[64];
+    unsigned wakes = 0, hist[64] = { 0 };
+    UINT64 window_start = GetTickCount64();
     while (!freerdp_shall_disconnect_context(context)) {
         DWORD count = 0;
         handles[count++] = cctx->stop_event;
@@ -682,6 +686,23 @@ static DWORD WINAPI crdp_client_thread(LPVOID param) {
             break;
         if (wait == WAIT_FAILED)
             break;
+        // Debug-level wake summary: an idle session takes a handful of wakes
+        // per second, so this only fires when something streams (frames,
+        // audio to the no-op backend, a stuck handle) and names the culprit
+        // by handle index (0 stop, 1 commands, then FreeRDP's transport and
+        // channel handles in freerdp_get_event_handles order).
+        if (wait - WAIT_OBJECT_0 < 64)
+            hist[wait - WAIT_OBJECT_0]++;
+        if (++wakes % 2000 == 0) {
+            UINT64 now = GetTickCount64();
+            unsigned top = 0;
+            for (unsigned i = 1; i < 64; i++)
+                if (hist[i] > hist[top]) top = i;
+            os_log_debug(crdp_oslog(), "rdp client loop: 2000 wakes in %llu ms, %u handles, top index %u x%u",
+                         (unsigned long long)(now - window_start), (unsigned)count, top, hist[top]);
+            memset(hist, 0, sizeof(hist));
+            window_start = now;
+        }
 
         // Input and resolution changes are queued from the main thread; run
         // them here so the transport is only ever touched by this thread.

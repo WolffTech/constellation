@@ -226,6 +226,102 @@ struct RDPProofTests {
         #expect(terminal == .disconnected(nil))
     }
 
+    private nonisolated static var profilingEnabled: Bool {
+        credentials != nil && ProcessInfo.processInfo.environment["CONSTELLATION_TEST_RDP_PROFILE"] == "1"
+    }
+
+    /// Milestone 4 exit check: repeated connection cycles must not leak or
+    /// hang. Each cycle connects, waits for a frame, idles, disconnects and
+    /// frees the session (deinit joins FreeRDP's thread). Prints resident
+    /// memory per cycle, teardown time and idle CPU; asserts the loose bounds
+    /// that would flag a leak or a stuck thread. Opt in with
+    /// CONSTELLATION_TEST_RDP_PROFILE=1; CONSTELLATION_TEST_RDP_CYCLES sets the
+    /// count (default 5).
+    @Test(.enabled(if: profilingEnabled, "set CONSTELLATION_TEST_RDP_PROFILE=1 to run"))
+    func survivesRepeatedConnectionCycles() async throws {
+        let env = ProcessInfo.processInfo.environment
+        let creds = try #require(Self.credentials)
+        let cycles = Int(env["CONSTELLATION_TEST_RDP_CYCLES"] ?? "") ?? 5
+        let configuration = RDPSessionConfiguration(
+            host: creds.host,
+            port: Int(env["CONSTELLATION_TEST_RDP_PORT"] ?? "") ?? 3389,
+            username: env["CONSTELLATION_TEST_RDP_USERNAME"],
+            domain: env["CONSTELLATION_TEST_RDP_DOMAIN"],
+            sharesClipboard: true)
+
+        var residentAfterCycle: [Double] = []
+        var teardownSeconds: [Double] = []
+        var idleCPUPercent: [Double] = []
+        let mainThread = mach_thread_self() // this test body runs on the main thread
+        defer { mach_port_deallocate(mach_task_self_, mainThread) }
+        for cycle in 1...cycles {
+            var session: RDPSession? = RDPSession(configuration: configuration, password: { creds.password }, verifyCertificate: { _ in .acceptOnce })
+            var window: NSWindow? = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800), styleMask: [.titled], backing: .buffered, defer: false)
+            window?.contentView = session?.view
+            let latest = SizeBox()
+            let frames = Counter()
+            session?.eventHandler = { event in
+                if case .framebufferSizeChanged(let w, let h) = event { latest.set(CGSize(width: w, height: h)) }
+                if case .framebufferSizeChanged = event { frames.increment() }
+            }
+            session?.connect()
+            for _ in 0..<300 where latest.value == nil { try? await Task.sleep(for: .milliseconds(100)) }
+            #expect(latest.value != nil, "cycle \(cycle): no frame")
+            #expect(session?.state == .connected, "cycle \(cycle): not connected")
+
+            // Idle load in 3 s buckets: right after the first frame the codec is
+            // still refining the desktop, so only the tail is truly idle.
+            var buckets: [Double] = []
+            var frameRates: [String] = []
+            for _ in 0..<4 {
+                let cpuBefore = ProcessLoad.cpuSeconds()
+                let wallBefore = Date()
+                let statsBefore = session?.frameStatistics ?? (updates: 0, snapshots: 0)
+                try await Task.sleep(for: .seconds(3))
+                let elapsed = Date().timeIntervalSince(wallBefore)
+                buckets.append((ProcessLoad.cpuSeconds() - cpuBefore) / elapsed * 100)
+                let stats = session?.frameStatistics ?? (updates: 0, snapshots: 0)
+                frameRates.append(String(format: "%.0f/%.0f", Double(stats.updates - statsBefore.updates) / elapsed, Double(stats.snapshots - statsBefore.snapshots) / elapsed))
+            }
+            let idle = buckets.last ?? .nan
+            idleCPUPercent.append(idle)
+            print("rdp profile cycle \(cycle): cpu% per 3 s bucket " + buckets.map { String(format: "%.1f", $0) }.joined(separator: " → ")
+                + "; updates/snapshots per s " + frameRates.joined(separator: " → "))
+            print("rdp profile cycle \(cycle): threads " + ProcessLoad.threadLoads(main: mainThread).map { "\($0.name) \(String(format: "%.1f", $0.percent))%" }.joined(separator: ", "))
+            #expect(idle < 15, "cycle \(cycle): idle session costs \(idle)% CPU")
+
+            session?.disconnect()
+            for _ in 0..<150 where session?.state.isLive == true { try? await Task.sleep(for: .milliseconds(100)) }
+            #expect(session?.state == .disconnected(nil), "cycle \(cycle): \(String(describing: session?.state))")
+
+            // Releasing the last reference runs the isolated deinit inline,
+            // which joins the client thread: that is the teardown cost.
+            window?.contentView = nil
+            window = nil
+            weak var released = session
+            let start = Date()
+            session = nil
+            let teardown = Date().timeIntervalSince(start)
+            #expect(released == nil, "cycle \(cycle): session still retained after release")
+            teardownSeconds.append(teardown)
+            #expect(teardown < 5, "cycle \(cycle): teardown took \(teardown)s")
+
+            let resident = ProcessLoad.residentMB()
+            residentAfterCycle.append(resident)
+            print(String(format: "rdp profile cycle %d: resident %.1f MB, teardown %.3f s, idle cpu %.1f%%, resizes %d", cycle, resident, teardown, idle, frames.value))
+        }
+
+        // The first cycles pay for codec tables and caches (observed: +14 MB,
+        // +2 MB, +1 MB, then flat); steady growth over the second half of the
+        // run points at a leak per session.
+        if cycles >= 4, let last = residentAfterCycle.last {
+            let half = cycles / 2
+            let growthPerCycle = (last - residentAfterCycle[half]) / Double(cycles - 1 - half)
+            print(String(format: "rdp profile: growth %.2f MB/cycle over the second half, max teardown %.3f s, mean idle cpu %.1f%%", growthPerCycle, teardownSeconds.max() ?? 0, idleCPUPercent.reduce(0, +) / Double(idleCPUPercent.count)))
+            #expect(growthPerCycle < 2, "resident memory grows \(growthPerCycle) MB per cycle")
+        }
+    }
+
     private func withTimeout<T: Sendable>(seconds: Double, _ body: @escaping @MainActor @Sendable () async -> T?) async -> T? {
         await withTaskGroup(of: T?.self) { group in
             group.addTask { await body() }
@@ -237,6 +333,69 @@ struct RDPProofTests {
             group.cancelAll()
             return result
         }
+    }
+}
+
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+    func increment() { lock.lock(); count += 1; lock.unlock() }
+}
+
+/// Process-level load figures for the profiling proof.
+private enum ProcessLoad {
+    static func residentMB() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return .nan }
+        return Double(info.resident_size) / 1_048_576
+    }
+
+    /// Recent CPU share of every thread above 1%, by thread name, so the
+    /// profiling proof can say who is busy (the client thread, the main
+    /// thread's snapshots, or something else).
+    static func threadLoads(main: thread_t) -> [(name: String, percent: Double)] {
+        var threads: thread_act_array_t?
+        var count: mach_msg_type_number_t = 0
+        guard task_threads(mach_task_self_, &threads, &count) == KERN_SUCCESS, let threads else { return [] }
+        defer {
+            for index in 0..<Int(count) { mach_port_deallocate(mach_task_self_, threads[index]) }
+            vm_deallocate(mach_task_self_, vm_address_t(bitPattern: threads), vm_size_t(count) * vm_size_t(MemoryLayout<thread_t>.stride))
+        }
+        var loads: [(name: String, percent: Double)] = []
+        for index in 0..<Int(count) {
+            let thread = threads[index]
+            var info = thread_basic_info()
+            var infoCount = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<natural_t>.size)
+            let result = withUnsafeMutablePointer(to: &info) { pointer in
+                pointer.withMemoryRebound(to: integer_t.self, capacity: Int(infoCount)) {
+                    thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), $0, &infoCount)
+                }
+            }
+            guard result == KERN_SUCCESS, info.flags & TH_FLAGS_IDLE == 0 else { continue }
+            let percent = Double(info.cpu_usage) / Double(TH_USAGE_SCALE) * 100
+            guard percent >= 1 else { continue }
+            var name = [CChar](repeating: 0, count: 64)
+            if let pthread = pthread_from_mach_thread_np(thread) { pthread_getname_np(pthread, &name, name.count) }
+            var label = String(cString: name)
+            if label.isEmpty { label = thread == main ? "main" : "thread \(thread)" }
+            loads.append((label, percent))
+        }
+        return loads.sorted { $0.percent > $1.percent }
+    }
+
+    /// User + system CPU time consumed by this process so far.
+    static func cpuSeconds() -> Double {
+        var usage = rusage()
+        getrusage(RUSAGE_SELF, &usage)
+        let seconds = { (time: timeval) in Double(time.tv_sec) + Double(time.tv_usec) / 1_000_000 }
+        return seconds(usage.ru_utime) + seconds(usage.ru_stime)
     }
 }
 

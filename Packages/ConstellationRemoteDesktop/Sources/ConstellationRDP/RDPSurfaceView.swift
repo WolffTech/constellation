@@ -23,6 +23,9 @@ final class RDPSurfaceView: NSView {
     private var previousModifiers: NSEvent.ModifierFlags = []
     private var displayLink: CADisplayLink?
     private var needsSnapshot = false
+    /// Frame updates received and snapshots taken; read by profiling tests.
+    private(set) var updateCount = 0
+    private(set) var snapshotCount = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -59,7 +62,10 @@ final class RDPSurfaceView: NSView {
         layer?.contents = nil
     }
 
-    func markDirty() { needsSnapshot = true }
+    func markDirty() {
+        needsSnapshot = true
+        updateCount += 1
+    }
 
     var framebufferSize: CGSize? { bufferSize == .zero ? nil : bufferSize }
 
@@ -80,6 +86,7 @@ final class RDPSurfaceView: NSView {
     @objc private func displayLinkFired(_ link: CADisplayLink) {
         guard needsSnapshot else { return }
         needsSnapshot = false
+        snapshotCount += 1
         refreshImage()
     }
 
