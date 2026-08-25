@@ -1,0 +1,258 @@
+[
+  {
+    "name": "Ghostty",
+    "version": "commit da5ddcb08",
+    "license": "MIT",
+    "url": "https://github.com/ghostty-org/ghostty",
+    "summary": "libghostty renders the terminal in SSH tabs. The AppKit surface, keyboard and text-input code in ConstellationTerminal is adapted from Ghostty.app.",
+    "file": "ghostty.txt"
+  },
+  {
+    "name": "FreeRDP and WinPR",
+    "version": "3.30.0",
+    "license": "Apache-2.0",
+    "url": "https://github.com/FreeRDP/FreeRDP",
+    "summary": "RDP protocol, codecs and channels behind RDP sessions.",
+    "file": "freerdp.txt"
+  },
+  {
+    "name": "OpenSSL",
+    "version": "3.6.3",
+    "license": "Apache-2.0",
+    "url": "https://openssl-library.org",
+    "summary": "TLS and cryptography for RDP, linked statically into the FreeRDP kit.",
+    "file": "openssl.txt"
+  },
+  {
+    "name": "MD4 and MD5 (Solar Designer)",
+    "version": "bundled with WinPR",
+    "license": "Public domain",
+    "url": "https://openwall.info/wiki/people/solar/software/public-domain-source-code/md5",
+    "summary": "Hash implementations WinPR compiles in so NTLM authentication does not need OpenSSL's legacy provider.",
+    "file": "md4-md5.txt"
+  },
+  {
+    "name": "RoyalVNCKit",
+    "version": "1.1.0",
+    "license": "MIT",
+    "url": "https://github.com/royalapplications/royalvnc",
+    "summary": "VNC protocol and framebuffer view behind VNC sessions.",
+    "file": "royalvnckit.txt"
+  },
+  {
+    "name": "CryptoSwift",
+    "version": "royalapplications fork",
+    "license": "zlib",
+    "url": "https://github.com/krzyzanowskim/CryptoSwift",
+    "summary": "Cryptography used by RoyalVNCKit for VNC authentication.",
+    "file": "cryptoswift.txt"
+  },
+  {
+    "name": "swift-png",
+    "version": "4.5.1",
+    "license": "Apache-2.0",
+    "url": "https://github.com/tayloraswift/swift-png",
+    "summary": "PNG decoding used by RoyalVNCKit.",
+    "file": "swift-png.txt"
+  },
+  {
+    "name": "swift-jpeg",
+    "version": "2.1.0",
+    "license": "Apache-2.0",
+    "url": "https://github.com/tayloraswift/swift-jpeg",
+    "summary": "JPEG decoding used by RoyalVNCKit.",
+    "file": "swift-jpeg.txt"
+  },
+  {
+    "name": "h",
+    "version": "1.0.1",
+    "license": "Apache-2.0",
+    "url": "https://github.com/rarestype/h",
+    "summary": "Dependency of swift-png and swift-jpeg.",
+    "file": "h.txt"
+  },
+  {
+    "name": "GRDB",
+    "version": "7.11.1",
+    "license": "MIT",
+    "url": "https://github.com/groue/GRDB.swift",
+    "summary": "SQLite access for the machine library and the certificate trust store.",
+    "file": "grdb.txt"
+  },
+  {
+    "name": "FreeType",
+    "version": "2.13.2",
+    "license": "FreeType License",
+    "url": "https://freetype.org",
+    "summary": "Font rasterization inside libghostty.",
+    "file": "freetype.txt"
+  },
+  {
+    "name": "libpng",
+    "version": "1.6.43",
+    "license": "PNG Reference Library License v2",
+    "url": "http://www.libpng.org/pub/png/libpng.html",
+    "summary": "PNG support for FreeType.",
+    "file": "libpng.txt"
+  },
+  {
+    "name": "zlib",
+    "version": "1.3.1",
+    "license": "zlib",
+    "url": "https://zlib.net",
+    "summary": "Compression used by libpng and FreeType.",
+    "file": "zlib.txt"
+  },
+  {
+    "name": "Oniguruma",
+    "version": "6.9.9",
+    "license": "BSD-2-Clause",
+    "url": "https://github.com/kkos/oniguruma",
+    "summary": "Regular expressions for libghostty's link and search matching.",
+    "file": "oniguruma.txt"
+  },
+  {
+    "name": "glslang",
+    "version": "14.2.0",
+    "license": "BSD-3-Clause, BSD-2-Clause, MIT, Apache-2.0",
+    "url": "https://github.com/KhronosGroup/glslang",
+    "summary": "Shader compilation for libghostty's renderer.",
+    "file": "glslang.txt"
+  },
+  {
+    "name": "SPIRV-Cross",
+    "version": "13.1.1",
+    "license": "Apache-2.0",
+    "url": "https://github.com/KhronosGroup/SPIRV-Cross",
+    "summary": "Shader translation for libghostty's Metal renderer.",
+    "file": "spirv-cross.txt"
+  },
+  {
+    "name": "simdutf",
+    "version": "5.2.8",
+    "license": "MIT (or Apache-2.0)",
+    "url": "https://github.com/simdutf/simdutf",
+    "summary": "Fast UTF-8 validation and transcoding in libghostty.",
+    "file": "simdutf.txt"
+  },
+  {
+    "name": "Highway",
+    "version": "1.2.0",
+    "license": "Apache-2.0 (or BSD-3-Clause)",
+    "url": "https://github.com/google/highway",
+    "summary": "SIMD primitives for libghostty's terminal parser.",
+    "file": "highway.txt"
+  },
+  {
+    "name": "Wuffs",
+    "version": "commit 7411f48",
+    "license": "Apache-2.0 (or MIT)",
+    "url": "https://github.com/google/wuffs",
+    "summary": "Image decoding in libghostty.",
+    "file": "wuffs.txt"
+  },
+  {
+    "name": "GNU libintl (gettext runtime)",
+    "version": "0.24",
+    "license": "LGPL-2.1-or-later",
+    "url": "https://www.gnu.org/software/gettext/",
+    "summary": "Message translation runtime bundled by libghostty on macOS. It is linked statically; the open build scripts in this repository let you relink Constellation against a modified libintl.",
+    "file": "libintl.txt"
+  },
+  {
+    "name": "Dear ImGui",
+    "version": "1.92.5-docking",
+    "license": "MIT",
+    "url": "https://github.com/ocornut/imgui",
+    "summary": "libghostty's inspector UI.",
+    "file": "imgui.txt"
+  },
+  {
+    "name": "Dear Bindings",
+    "version": "0.17",
+    "license": "MIT",
+    "url": "https://github.com/dearimgui/dear_bindings",
+    "summary": "C bindings for Dear ImGui used by libghostty.",
+    "file": "dear-bindings.txt"
+  },
+  {
+    "name": "stb_image and stb_image_resize",
+    "version": "2.28 / 0.97",
+    "license": "MIT or public domain",
+    "url": "https://github.com/nothings/stb",
+    "summary": "Image loading in libghostty.",
+    "file": "stb.txt"
+  },
+  {
+    "name": "libxev",
+    "version": "commit 9ce8e8e",
+    "license": "MIT",
+    "url": "https://github.com/mitchellh/libxev",
+    "summary": "Event loop for libghostty's I/O thread.",
+    "file": "libxev.txt"
+  },
+  {
+    "name": "libvaxis",
+    "version": "0.6.0",
+    "license": "MIT",
+    "url": "https://github.com/rockorager/libvaxis",
+    "summary": "Terminal UI library used by libghostty.",
+    "file": "vaxis.txt"
+  },
+  {
+    "name": "zigimg",
+    "version": "commit d695acd",
+    "license": "MIT",
+    "url": "https://github.com/zigimg/zigimg",
+    "summary": "Image library pulled in by libvaxis.",
+    "file": "zigimg.txt"
+  },
+  {
+    "name": "z2d",
+    "version": "0.12.1",
+    "license": "MPL-2.0",
+    "url": "https://github.com/vancluever/z2d",
+    "summary": "2D vector drawing for libghostty's box-drawing glyphs. Its source is available unmodified from the upstream repository, as the MPL requires.",
+    "file": "z2d.txt"
+  },
+  {
+    "name": "zf",
+    "version": "0.11.0",
+    "license": "MIT",
+    "url": "https://github.com/natecraddock/zf",
+    "summary": "Fuzzy matching in libghostty.",
+    "file": "zf.txt"
+  },
+  {
+    "name": "zig-objc",
+    "version": "commit c8de82f",
+    "license": "MIT",
+    "url": "https://github.com/mitchellh/zig-objc",
+    "summary": "Objective-C runtime bindings for libghostty on macOS.",
+    "file": "zig-objc.txt"
+  },
+  {
+    "name": "uucode",
+    "version": "0.2.0",
+    "license": "MIT; includes Unicode Character Database data under the Unicode License",
+    "url": "https://github.com/jacobsandlund/uucode",
+    "summary": "Unicode properties and grapheme segmentation in libghostty.",
+    "file": "uucode.txt"
+  },
+  {
+    "name": "JetBrains Mono",
+    "version": "2.304",
+    "license": "SIL Open Font License 1.1",
+    "url": "https://github.com/JetBrains/JetBrainsMono",
+    "summary": "Fallback terminal font embedded in libghostty.",
+    "file": "jetbrains-mono.txt"
+  },
+  {
+    "name": "Symbols Nerd Font",
+    "version": "3.4.0",
+    "license": "MIT",
+    "url": "https://github.com/ryanoasis/nerd-fonts",
+    "summary": "Symbol glyphs embedded in libghostty.",
+    "file": "nerd-fonts.txt"
+  }
+]

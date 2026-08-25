@@ -74,11 +74,28 @@ struct ConstellationApp: App {
                     .keyboardShortcut("f")
                     .disabled(root.sessions?.selectedSessionID == nil)
             }
+            CommandGroup(after: .help) {
+                AcknowledgementsCommand()
+            }
         }
+
+        Window("Acknowledgements", id: "acknowledgements") {
+            AcknowledgementsView()
+        }
+        .defaultSize(width: 760, height: 520)
 
         Settings {
             TerminalSettingsView(settings: root.terminalSettings)
         }
+    }
+}
+
+/// Menu content gets the environment, so this is where `openWindow` lives.
+private struct AcknowledgementsCommand: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Acknowledgements") { openWindow(id: "acknowledgements") }
     }
 }
 

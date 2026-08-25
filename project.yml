@@ -34,6 +34,12 @@ targets:
     platform: macOS
     sources:
       - path: App
+        excludes:
+          - Licenses
+      # Folder reference so the manifest and license texts ship under Resources/Licenses.
+      - path: App/Licenses
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: ConstellationCore
       - package: ConstellationTerminal
