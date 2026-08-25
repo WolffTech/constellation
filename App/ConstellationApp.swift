@@ -76,6 +76,7 @@ struct ConstellationApp: App {
             }
             CommandGroup(after: .help) {
                 AcknowledgementsCommand()
+                Button("Save Support Bundle…") { SupportBundlePanel.save(root: root) }
             }
         }
 

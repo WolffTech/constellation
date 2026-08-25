@@ -105,7 +105,7 @@ final class CompositionRoot {
 
     /// `~/Library/Application Support/Constellation/library.sqlite`, or
     /// `CONSTELLATION_LIBRARY_PATH` for development runs.
-    private static func libraryPath() -> String {
+    static func libraryPath() -> String {
         if let override = ProcessInfo.processInfo.environment["CONSTELLATION_LIBRARY_PATH"], !override.isEmpty {
             return override
         }
@@ -115,7 +115,7 @@ final class CompositionRoot {
 
     /// The Trust Store's own database, beside the library.
     /// `CONSTELLATION_TRUST_STORE_PATH` overrides it for development runs.
-    private static func trustStorePath() -> String {
+    static func trustStorePath() -> String {
         if let override = ProcessInfo.processInfo.environment["CONSTELLATION_TRUST_STORE_PATH"], !override.isEmpty {
             return override
         }
