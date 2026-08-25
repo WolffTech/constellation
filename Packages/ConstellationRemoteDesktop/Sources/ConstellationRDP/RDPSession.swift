@@ -25,6 +25,10 @@ public final class RDPSession: RemoteDesktopSession {
     private var handle: OpaquePointer?
     private var connectTask: Task<Void, Never>?
     private var resizeTask: Task<Void, Never>?
+    /// Present only when the configuration shares the clipboard.
+    private let clipboard: RDPClipboardSync?
+    /// Polls the pasteboard while connected; AppKit has no change notification.
+    private var clipboardTimer: Timer?
     /// The last pixel size asked of the server, so repeated layouts dedupe.
     private var requestedPixelSize: CGSize?
 
@@ -53,6 +57,7 @@ public final class RDPSession: RemoteDesktopSession {
         self.configuration = configuration
         self.passwordProvider = password
         self.verifier = verifyCertificate
+        clipboard = configuration.sharesClipboard ? RDPClipboardSync() : nil
         host = RDPHostView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
         view = host
         surface.inputSink = { [weak self] event in self?.handle(input: event) }
@@ -63,6 +68,7 @@ public final class RDPSession: RemoteDesktopSession {
 
     isolated deinit {
         resizeTask?.cancel()
+        clipboardTimer?.invalidate()
         if let handle { crdp_session_free(handle) }
     }
 
@@ -110,7 +116,8 @@ public final class RDPSession: RemoteDesktopSession {
             state_changed: rdpStateChanged,
             frame_resized: rdpFrameResized,
             frame_updated: rdpFrameUpdated,
-            verify_certificate: rdpVerifyCertificate)
+            verify_certificate: rdpVerifyCertificate,
+            clipboard_text: rdpClipboardText)
 
         // The password is copied into FreeRDP's settings and this stack frame
         // is the only other place it lives.
@@ -155,8 +162,11 @@ public final class RDPSession: RemoteDesktopSession {
             focus()
             // The initial size came from configuration; catch up with the view.
             requestFitResolution()
+            startClipboardSync()
         case CRDP_STATE_DISCONNECTED:
             resizeTask?.cancel()
+            clipboardTimer?.invalidate()
+            clipboardTimer = nil
             transition(to: .disconnected(Self.failure(from: failure)))
         default:
             break
@@ -180,6 +190,31 @@ public final class RDPSession: RemoteDesktopSession {
 
     fileprivate func verifyCertificate(_ certificate: RDPCertificate) async -> RDPCertificateVerdict {
         await verifier(certificate)
+    }
+
+    fileprivate func clipboardTextReceived(_ text: String) {
+        clipboard?.receive(remoteText: text)
+    }
+
+    // MARK: Clipboard
+
+    /// Offers what is already on the pasteboard, then watches for copies.
+    private func startClipboardSync() {
+        guard let clipboard, clipboardTimer == nil else { return }
+        offer(clipboard.currentText())
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let text = self.clipboard?.pollLocalChange() else { return }
+                self.offer(text)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        clipboardTimer = timer
+    }
+
+    private func offer(_ text: String?) {
+        guard let handle, let text, !text.isEmpty else { return }
+        crdp_session_set_clipboard_text(handle, text)
     }
 
     // MARK: Helpers
@@ -309,6 +344,15 @@ private func rdpFrameResized(_ context: UnsafeMutableRawPointer?, _ buffer: Unsa
     let boxed = SendableBox((context, buffer, Int(width), Int(height), Int(stride)))
     Task { @MainActor in
         session(from: boxed.value.0)?.frameResized(buffer: boxed.value.1, width: boxed.value.2, height: boxed.value.3, stride: boxed.value.4)
+    }
+}
+
+private func rdpClipboardText(_ context: UnsafeMutableRawPointer?, _ utf8: UnsafePointer<CChar>?) {
+    guard let utf8 else { return }
+    let text = String(cString: utf8) // copied; the C string dies with the call
+    let boxed = SendableBox(context)
+    Task { @MainActor in
+        session(from: boxed.value)?.clipboardTextReceived(text)
     }
 }
 

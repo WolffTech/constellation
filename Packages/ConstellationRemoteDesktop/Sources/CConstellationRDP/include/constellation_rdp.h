@@ -84,6 +84,9 @@ typedef struct {
     /// lets connection setup continue; `CRDP_CERT_REJECT` aborts it.
     crdp_cert_verdict (*verify_certificate)(void *context,
                                             const crdp_certificate *certificate);
+    /// The remote clipboard now holds this UTF-8 text. Only fires with
+    /// `share_clipboard`; the string is valid for the duration of the call.
+    void (*clipboard_text)(void *context, const char *utf8);
 } crdp_callbacks;
 
 /// Builds a session. Copies `config` and `callbacks`; both may be freed after.
@@ -120,6 +123,11 @@ void crdp_session_send_synchronize(crdp_session *session, uint32_t toggle_flags)
 /// and is connected. `scale_percent` as in `crdp_config`.
 void crdp_session_request_resolution(crdp_session *session, uint32_t width,
                                      uint32_t height, uint32_t scale_percent);
+
+/// Offers UTF-8 text from the local pasteboard to the remote clipboard. The
+/// bridge keeps a copy and serves it when the server asks. `NULL` withdraws
+/// the offer. A no-op unless the session has `share_clipboard`.
+void crdp_session_set_clipboard_text(crdp_session *session, const char *utf8);
 
 /// Translates a macOS virtual key code (NSEvent.keyCode) to an RDP scancode,
 /// returning the KBD_FLAGS_EXTENDED bit in `*extended`. Returns 0 if unmapped.

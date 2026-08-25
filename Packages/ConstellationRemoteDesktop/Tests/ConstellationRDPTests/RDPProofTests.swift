@@ -183,6 +183,49 @@ struct RDPProofTests {
         session.disconnect()
     }
 
+    /// Clipboard sharing loads the cliprdr channel and negotiates on connect;
+    /// a missing addin or a bad capability exchange would fail the session
+    /// before a frame arrives. Copy/paste itself needs a person on both ends.
+    @Test(.enabled(if: credentials != nil, "set CONSTELLATION_TEST_RDP_HOST and _PASSWORD to run"))
+    func connectsWithClipboardSharing() async throws {
+        let env = ProcessInfo.processInfo.environment
+        let creds = try #require(Self.credentials)
+        let configuration = RDPSessionConfiguration(
+            host: creds.host,
+            port: Int(env["CONSTELLATION_TEST_RDP_PORT"] ?? "") ?? 3389,
+            username: env["CONSTELLATION_TEST_RDP_USERNAME"],
+            domain: env["CONSTELLATION_TEST_RDP_DOMAIN"],
+            sharesClipboard: true)
+        let session = RDPSession(configuration: configuration, password: { creds.password }, verifyCertificate: { _ in .acceptOnce })
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = session.view
+        let events = AsyncStream<RemoteDesktopSessionEvent>.makeStream()
+        session.eventHandler = { events.continuation.yield($0) }
+        session.connect()
+        let frame = await withTimeout(seconds: 30) {
+            for await event in events.stream {
+                if case .framebufferSizeChanged(let w, let h) = event { return (w, h) }
+                if case .stateChanged(.disconnected(let f)) = event {
+                    Issue.record("disconnected before a frame with clipboard sharing: \(String(describing: f))")
+                    return nil
+                }
+            }
+            return nil
+        }
+        #expect(try #require(frame).0 > 0)
+        // Give the channel's MonitorReady exchange a moment, then leave cleanly.
+        try await Task.sleep(for: .seconds(2))
+        #expect(session.state == .connected)
+        session.disconnect()
+        let terminal = await withTimeout(seconds: 15) {
+            for await event in events.stream {
+                if case .stateChanged(let state) = event, !state.isLive, state != .idle { return state }
+            }
+            return nil
+        }
+        #expect(terminal == .disconnected(nil))
+    }
+
     private func withTimeout<T: Sendable>(seconds: Double, _ body: @escaping @MainActor @Sendable () async -> T?) async -> T? {
         await withTaskGroup(of: T?.self) { group in
             group.addTask { await body() }

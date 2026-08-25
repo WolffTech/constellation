@@ -14,6 +14,8 @@
 #include <freerdp/gdi/gfx.h>
 #include <freerdp/client/disp.h>
 #include <freerdp/channels/disp.h>
+#include <freerdp/client/cliprdr.h>
+#include <freerdp/channels/cliprdr.h>
 #include <freerdp/channels/channels.h>
 #include <freerdp/codec/color.h>
 #include <freerdp/constants.h>
@@ -25,6 +27,8 @@
 #include <winpr/synch.h>
 #include <winpr/thread.h>
 #include <winpr/input.h>
+#include <winpr/string.h>
+#include <winpr/user.h>
 #include <winpr/wlog.h>
 #include <os/log.h>
 
@@ -50,6 +54,7 @@ typedef enum {
     CRDP_CMD_KEY_UNICODE,
     CRDP_CMD_SYNCHRONIZE,
     CRDP_CMD_RESOLUTION,
+    CRDP_CMD_CLIPBOARD_TEXT,
 } crdp_command_type;
 
 typedef struct {
@@ -62,6 +67,7 @@ typedef struct {
     uint32_t a; // synchronize toggle flags, or resolution width
     uint32_t b; // resolution height
     uint32_t c; // resolution scale percent
+    char *text; // owned UTF-8 for CRDP_CMD_CLIPBOARD_TEXT (NULL withdraws); freed once executed or dropped
 } crdp_command;
 
 #define CRDP_COMMAND_CAPACITY 1024
@@ -80,6 +86,9 @@ struct crdp_session {
     uint32_t pending_height;
     uint32_t pending_scale;
     bool disp_ready; // Display Control caps received; layouts accepted now
+    CliprdrClientContext *cliprdr; // captured when the clipboard channel connects
+    bool cliprdr_ready;            // MonitorReady seen; format lists accepted now
+    char *local_text;              // UTF-8 the local pasteboard offers; served on request
     volatile bool connected;
     // Tracks the buffer the Swift side last saw, so a GFX ResetGraphics realloc
     // is reported as a resize rather than an update against a stale pointer.
@@ -98,10 +107,13 @@ struct crdp_session {
 // Appends a command and wakes the client thread. Drops the oldest command if
 // the queue is full (only stale pointer moves are ever lost).
 static void crdp_enqueue(crdp_session *session, crdp_command command) {
-    if (!session || !session->context)
+    if (!session || !session->context) {
+        free(command.text);
         return;
+    }
     pthread_mutex_lock(&session->command_lock);
     if (session->command_count == CRDP_COMMAND_CAPACITY) {
+        free(session->commands[session->command_head].text);
         session->command_head = (session->command_head + 1) % CRDP_COMMAND_CAPACITY;
         session->command_count--;
     }
@@ -310,12 +322,151 @@ static UINT crdp_disp_caps(DispClientContext *disp, UINT32 maxNumMonitors,
     return CHANNEL_RC_OK;
 }
 
+// MARK: - Clipboard (text only)
+//
+// Local -> remote: the Swift side hands over UTF-8 (`crdp_session_set_clipboard_text`),
+// the bridge announces CF_UNICODETEXT/CF_TEXT and serves the copy when the
+// server asks. Remote -> local: on a server format list with text the bridge
+// requests CF_UNICODETEXT and passes the UTF-8 to the `clipboard_text` callback.
+// All of it runs on the client thread, like every other transport write.
+
+static UINT crdp_cliprdr_send_capabilities(CliprdrClientContext *cliprdr) {
+    CLIPRDR_GENERAL_CAPABILITY_SET general = { 0 };
+    general.capabilitySetType = CB_CAPSTYPE_GENERAL;
+    general.capabilitySetLength = CB_CAPSTYPE_GENERAL_LEN;
+    general.version = CB_CAPS_VERSION_2;
+    general.generalFlags = CB_USE_LONG_FORMAT_NAMES;
+    CLIPRDR_CAPABILITIES capabilities = { 0 };
+    capabilities.common.msgType = CB_CLIP_CAPS;
+    capabilities.cCapabilitiesSets = 1;
+    capabilities.capabilitySets = (CLIPRDR_CAPABILITY_SET *)&general;
+    return cliprdr->ClientCapabilities(cliprdr, &capabilities);
+}
+
+// Announces what the local side offers: text, or nothing.
+static UINT crdp_cliprdr_send_format_list(crdp_session *session) {
+    CLIPRDR_FORMAT formats[2] = { { .formatId = CF_UNICODETEXT }, { .formatId = CF_TEXT } };
+    CLIPRDR_FORMAT_LIST list = { 0 };
+    list.common.msgType = CB_FORMAT_LIST;
+    list.numFormats = session->local_text ? 2 : 0;
+    list.formats = formats;
+    return session->cliprdr->ClientFormatList(session->cliprdr, &list);
+}
+
+static UINT crdp_cliprdr_monitor_ready(CliprdrClientContext *cliprdr, const CLIPRDR_MONITOR_READY *ready) {
+    (void)ready;
+    crdp_session *session = cliprdr->custom;
+    UINT rc = crdp_cliprdr_send_capabilities(cliprdr);
+    if (rc != CHANNEL_RC_OK)
+        return rc;
+    session->cliprdr_ready = true;
+    os_log(crdp_oslog(), "rdp clipboard ready, offering text=%d", session->local_text != NULL);
+    return crdp_cliprdr_send_format_list(session);
+}
+
+static UINT crdp_cliprdr_server_capabilities(CliprdrClientContext *cliprdr, const CLIPRDR_CAPABILITIES *capabilities) {
+    (void)cliprdr;
+    (void)capabilities;
+    return CHANNEL_RC_OK; // text needs nothing beyond the base protocol
+}
+
+// The remote clipboard changed. Acknowledge, and pull the text if it has any.
+static UINT crdp_cliprdr_server_format_list(CliprdrClientContext *cliprdr, const CLIPRDR_FORMAT_LIST *list) {
+    bool has_text = false;
+    for (UINT32 i = 0; i < list->numFormats; i++) {
+        if (list->formats[i].formatId == CF_UNICODETEXT)
+            has_text = true;
+    }
+    os_log(crdp_oslog(), "rdp clipboard server offers %u formats, text=%d", list->numFormats, has_text);
+    CLIPRDR_FORMAT_LIST_RESPONSE response = { 0 };
+    response.common.msgType = CB_FORMAT_LIST_RESPONSE;
+    response.common.msgFlags = CB_RESPONSE_OK;
+    UINT rc = cliprdr->ClientFormatListResponse(cliprdr, &response);
+    if (rc != CHANNEL_RC_OK || !has_text)
+        return rc;
+    CLIPRDR_FORMAT_DATA_REQUEST request = { 0 };
+    request.common.msgType = CB_FORMAT_DATA_REQUEST;
+    request.requestedFormatId = CF_UNICODETEXT;
+    return cliprdr->ClientFormatDataRequest(cliprdr, &request);
+}
+
+static UINT crdp_cliprdr_server_format_list_response(CliprdrClientContext *cliprdr, const CLIPRDR_FORMAT_LIST_RESPONSE *response) {
+    (void)cliprdr;
+    (void)response;
+    return CHANNEL_RC_OK;
+}
+
+// The server wants the text we announced.
+static UINT crdp_cliprdr_server_format_data_request(CliprdrClientContext *cliprdr, const CLIPRDR_FORMAT_DATA_REQUEST *request) {
+    crdp_session *session = cliprdr->custom;
+    CLIPRDR_FORMAT_DATA_RESPONSE response = { 0 };
+    response.common.msgType = CB_FORMAT_DATA_RESPONSE;
+    response.common.msgFlags = CB_RESPONSE_FAIL;
+    WCHAR *wide = NULL;
+    if (session->local_text && request->requestedFormatId == CF_UNICODETEXT) {
+        size_t length = 0;
+        wide = ConvertUtf8ToWCharAlloc(session->local_text, &length);
+        if (wide) {
+            response.common.msgFlags = CB_RESPONSE_OK;
+            response.common.dataLen = (UINT32)((length + 1) * sizeof(WCHAR)); // with terminator
+            response.requestedFormatData = (const BYTE *)wide;
+        }
+    } else if (session->local_text && request->requestedFormatId == CF_TEXT) {
+        // CF_TEXT is in the server's ANSI code page; UTF-8 is the closest we
+        // have and matches for ASCII, which is what this format is used for.
+        response.common.msgFlags = CB_RESPONSE_OK;
+        response.common.dataLen = (UINT32)(strlen(session->local_text) + 1);
+        response.requestedFormatData = (const BYTE *)session->local_text;
+    }
+    // Length only; clipboard contents never reach the log.
+    os_log(crdp_oslog(), "rdp clipboard server requested format %u -> %s (%u bytes)",
+           request->requestedFormatId, response.common.msgFlags == CB_RESPONSE_OK ? "ok" : "fail",
+           response.common.dataLen);
+    UINT rc = cliprdr->ClientFormatDataResponse(cliprdr, &response);
+    free(wide);
+    return rc;
+}
+
+// The text we asked for after a server format list.
+static UINT crdp_cliprdr_server_format_data_response(CliprdrClientContext *cliprdr, const CLIPRDR_FORMAT_DATA_RESPONSE *response) {
+    crdp_session *session = cliprdr->custom;
+    if (!(response->common.msgFlags & CB_RESPONSE_OK) || !response->requestedFormatData ||
+        !session->callbacks.clipboard_text)
+        return CHANNEL_RC_OK;
+    char *utf8 = ConvertWCharNToUtf8Alloc((const WCHAR *)response->requestedFormatData,
+                                          response->common.dataLen / sizeof(WCHAR), NULL);
+    if (!utf8)
+        return CHANNEL_RC_OK;
+    os_log(crdp_oslog(), "rdp clipboard received text (%u bytes)", response->common.dataLen);
+    session->callbacks.clipboard_text(session->callbacks.context, utf8);
+    free(utf8);
+    return CHANNEL_RC_OK;
+}
+
+// Runs on the client thread: takes ownership of `text` and re-announces.
+static void crdp_apply_clipboard_text(crdp_session *session, char *text) {
+    free(session->local_text);
+    session->local_text = text;
+    if (session->cliprdr && session->cliprdr_ready && session->local_text)
+        crdp_cliprdr_send_format_list(session);
+}
+
 static void crdp_on_channel_connected(void *context, const ChannelConnectedEventArgs *e) {
     crdp_session *session = ((crdpContext *)context)->session;
     if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0) {
         session->disp = (DispClientContext *)e->pInterface;
         session->disp->custom = session;
         session->disp->DisplayControlCaps = crdp_disp_caps;
+    } else if (strcmp(e->name, CLIPRDR_SVC_CHANNEL_NAME) == 0) {
+        CliprdrClientContext *cliprdr = (CliprdrClientContext *)e->pInterface;
+        cliprdr->custom = session;
+        cliprdr->MonitorReady = crdp_cliprdr_monitor_ready;
+        cliprdr->ServerCapabilities = crdp_cliprdr_server_capabilities;
+        cliprdr->ServerFormatList = crdp_cliprdr_server_format_list;
+        cliprdr->ServerFormatListResponse = crdp_cliprdr_server_format_list_response;
+        cliprdr->ServerFormatDataRequest = crdp_cliprdr_server_format_data_request;
+        cliprdr->ServerFormatDataResponse = crdp_cliprdr_server_format_data_response;
+        session->cliprdr = cliprdr;
     }
     freerdp_client_OnChannelConnectedEventHandler(context, e);
 
@@ -332,6 +483,9 @@ static void crdp_on_channel_disconnected(void *context, const ChannelDisconnecte
     if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0) {
         session->disp = NULL;
         session->disp_ready = false;
+    } else if (strcmp(e->name, CLIPRDR_SVC_CHANNEL_NAME) == 0) {
+        session->cliprdr = NULL;
+        session->cliprdr_ready = false;
     }
     freerdp_client_OnChannelDisconnectedEventHandler(context, e);
 }
@@ -478,6 +632,9 @@ static void crdp_execute(crdp_session *session, const crdp_command *command) {
             break;
         case CRDP_CMD_RESOLUTION:
             crdp_apply_resolution(session, command->a, command->b, command->c);
+            break;
+        case CRDP_CMD_CLIPBOARD_TEXT:
+            crdp_apply_clipboard_text(session, command->text);
             break;
     }
 }
@@ -698,6 +855,10 @@ void crdp_session_free(crdp_session *session) {
         free(session->password);
     }
     free(session->domain);
+    free(session->local_text);
+    crdp_command leftover;
+    while (crdp_dequeue(session, &leftover))
+        free(leftover.text);
     pthread_mutex_destroy(&session->command_lock);
     free(session);
 }
@@ -740,6 +901,15 @@ void crdp_session_request_resolution(crdp_session *session, uint32_t width, uint
     if (!session || !session->connected || !session->config.dynamic_resolution)
         return;
     crdp_enqueue(session, (crdp_command){ .type = CRDP_CMD_RESOLUTION, .a = width, .b = height, .c = scale_percent });
+}
+
+void crdp_session_set_clipboard_text(crdp_session *session, const char *utf8) {
+    if (!session || !session->connected || !session->config.share_clipboard)
+        return;
+    char *copy = utf8 ? strdup(utf8) : NULL;
+    if (utf8 && !copy)
+        return;
+    crdp_enqueue(session, (crdp_command){ .type = CRDP_CMD_CLIPBOARD_TEXT, .text = copy });
 }
 
 uint8_t crdp_scancode_for_mac_keycode(uint16_t mac_keycode, bool *extended) {

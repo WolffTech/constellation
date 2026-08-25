@@ -93,6 +93,24 @@ struct MachineDraftTests {
         #expect(changes.contains(.deleteCredential(credential.id)))
     }
 
+    @Test func togglingRDPClipboardSharingIsSaved() throws {
+        let machine = Machine(name: "win")
+        let rdp = RDPProfile(machineID: machine.id, username: "nick")
+        let snapshot = MachineLibrarySnapshot(machines: [machine], profiles: [.rdp(rdp)])
+        var draft = MachineDraft(editing: machine, in: snapshot)
+        #expect(draft.rdpProfiles[0].profile.sharesClipboard == false)
+
+        draft.rdpProfiles[0].profile.sharesClipboard = true
+        guard case .batch(let changes) = try draft.change() else {
+            Issue.record("expected a batch")
+            return
+        }
+        let saved = changes.compactMap { change -> RDPProfile? in
+            if case .upsertProfile(.rdp(let profile)) = change { profile } else { nil }
+        }
+        #expect(saved.map(\.sharesClipboard) == [true])
+    }
+
     @Test func editingKeepsVNCProfilesAndTheirStoredPassword() throws {
         let machine = Machine(name: "screen")
         let credential = CredentialReference(label: "screen · VNC VNC password", kind: .password)

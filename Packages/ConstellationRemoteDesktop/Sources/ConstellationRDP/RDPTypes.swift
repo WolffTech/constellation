@@ -15,6 +15,8 @@ public struct RDPSessionConfiguration: Sendable, Equatable {
     public var width: Int
     public var height: Int
     public var dynamicResolution: Bool
+    /// Mirrors text between the local pasteboard and the remote clipboard,
+    /// both ways. Files and images are not shared.
     public var sharesClipboard: Bool
 
     public init(

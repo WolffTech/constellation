@@ -345,8 +345,7 @@ private struct RDPProfileSection: View {
                 hasStoredSecret: draft.hasStoredSecret,
                 enteredSecret: $draft.enteredSecret,
                 onRemoveStored: { draft.removeStoredSecret() })
-            // Clipboard sharing waits for cliprdr handlers in the bridge; the
-            // profile field exists but stays hidden until it does something.
+            Toggle("Share clipboard text with the remote desktop", isOn: $draft.profile.sharesClipboard)
         } header: {
             HStack(spacing: 8) {
                 Label(draft.profile.name.isEmpty ? "RDP Profile" : draft.profile.name, systemImage: ConnectionProtocol.rdp.symbolName)
