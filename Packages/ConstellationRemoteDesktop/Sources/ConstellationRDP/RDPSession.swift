@@ -10,6 +10,7 @@ import Foundation
 public final class RDPSession: RemoteDesktopSession {
     public let view: NSView
     public private(set) var state: RemoteDesktopSessionState = .idle
+    /// In pixels: on a Retina display the desktop is twice the view's point size.
     public private(set) var framebufferSize: CGSize?
     public var eventHandler: (@MainActor (RemoteDesktopSessionEvent) -> Void)?
     public var displayMode: RemoteDesktopDisplayMode = .fit {
@@ -24,7 +25,25 @@ public final class RDPSession: RemoteDesktopSession {
     private var handle: OpaquePointer?
     private var connectTask: Task<Void, Never>?
     private var resizeTask: Task<Void, Never>?
-    private var requestedSize: CGSize?
+    /// The last pixel size asked of the server, so repeated layouts dedupe.
+    private var requestedPixelSize: CGSize?
+
+    /// Pixels per point on the display showing the view. Before the view is on
+    /// screen the main display's scale is the best guess, so a Retina session
+    /// starts at the right density instead of resizing after the first frame.
+    private var backingScale: CGFloat {
+        host.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+    }
+
+    private var scalePercent: UInt32 { UInt32((backingScale * 100).rounded()) }
+
+    /// Converts a point size to the even-width pixel size MS-RDPEDISP accepts.
+    private func pixelSize(for points: CGSize) -> CGSize {
+        let scale = backingScale
+        var width = (points.width * scale).rounded(.down)
+        width -= width.truncatingRemainder(dividingBy: 2)
+        return CGSize(width: width, height: (points.height * scale).rounded(.down))
+    }
 
     public init(
         configuration: RDPSessionConfiguration,
@@ -71,11 +90,16 @@ public final class RDPSession: RemoteDesktopSession {
         surface.window?.makeFirstResponder(surface)
     }
 
-    /// Asks the server for a new desktop size. A no-op unless dynamic
-    /// resolution was negotiated and the session is connected.
+    /// Asks the server for a new desktop size, in points; the display's backing
+    /// scale turns it into pixels. A no-op unless dynamic resolution was
+    /// negotiated and the session is connected.
     public func requestResolution(width: Int, height: Int) {
+        request(pixels: pixelSize(for: CGSize(width: max(0, width), height: max(0, height))))
+    }
+
+    private func request(pixels: CGSize) {
         guard let handle, state == .connected else { return }
-        crdp_session_request_resolution(handle, UInt32(max(0, width)), UInt32(max(0, height)))
+        crdp_session_request_resolution(handle, UInt32(pixels.width), UInt32(pixels.height), scalePercent)
     }
 
     // MARK: Session start
@@ -94,14 +118,16 @@ public final class RDPSession: RemoteDesktopSession {
             withOptionalCString(configuration.username) { userPtr in
                 withOptionalCString(configuration.domain) { domainPtr in
                     withOptionalCString(password) { passwordPtr in
+                        let initial = pixelSize(for: CGSize(width: max(1, configuration.width), height: max(1, configuration.height)))
                         var config = crdp_config(
                             host: hostPtr,
                             port: UInt32(max(0, configuration.port)),
                             username: userPtr,
                             domain: domainPtr,
                             password: passwordPtr,
-                            width: UInt32(max(1, configuration.width)),
-                            height: UInt32(max(1, configuration.height)),
+                            width: UInt32(max(2, initial.width)),
+                            height: UInt32(max(1, initial.height)),
+                            scale_percent: scalePercent,
                             dynamic_resolution: configuration.dynamicResolution,
                             share_clipboard: configuration.sharesClipboard)
                         var callbacksCopy = callbacks
@@ -166,17 +192,19 @@ public final class RDPSession: RemoteDesktopSession {
         scheduleResolutionRequest(host.fitSize)
     }
 
-    /// Coalesces window resizes so the server sees one layout per pause.
+    /// Coalesces window resizes so the server sees one layout per pause. Works
+    /// in pixels so a move between displays of different density re-requests
+    /// even when the point size is unchanged.
     private func scheduleResolutionRequest(_ size: CGSize) {
-        let target = CGSize(width: size.width.rounded(.down), height: size.height.rounded(.down))
-        guard target.width >= 200, target.height >= 200, target != requestedSize else { return }
+        let target = pixelSize(for: size)
+        guard target.width >= 200, target.height >= 200, target != requestedPixelSize else { return }
         resizeTask?.cancel()
         resizeTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, let self else { return }
             guard self.framebufferSize != target else { return }
-            self.requestedSize = target
-            self.requestResolution(width: Int(target.width), height: Int(target.height))
+            self.requestedPixelSize = target
+            self.request(pixels: target)
         }
     }
 

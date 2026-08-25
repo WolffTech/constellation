@@ -8,8 +8,10 @@ public struct RDPSessionConfiguration: Sendable, Equatable {
     public var port: Int
     public var username: String?
     public var domain: String?
-    /// Initial desktop size in points. With `dynamicResolution` the session
-    /// asks the server to follow the view size afterwards.
+    /// Initial desktop size in points; the display's backing scale turns it
+    /// into pixels and a matching desktop scale (200% on Retina). With
+    /// `dynamicResolution` the session asks the server to follow the view size
+    /// afterwards.
     public var width: Int
     public var height: Int
     public var dynamicResolution: Bool

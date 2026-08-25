@@ -73,7 +73,10 @@ struct RDPProofTests {
         // accept the layout, and a real drag sends many requests too.
         window.setContentSize(NSSize(width: 1024, height: 704))
         session.view.layoutSubtreeIfNeeded()
-        let target = CGSize(width: 1024, height: 704)
+        // The desktop is requested in pixels, so expect the point size scaled
+        // by the display (2048x1408 on Retina).
+        let scale = window.backingScaleFactor
+        let target = CGSize(width: 1024 * scale, height: 704 * scale)
         var resized = false
         for i in 0..<40 where !resized {
             if i % 6 == 0 { session.requestResolution(width: 1024, height: 704) }

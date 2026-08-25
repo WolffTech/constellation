@@ -46,8 +46,11 @@ typedef struct {
     const char *username; // may be NULL
     const char *domain;   // may be NULL
     const char *password; // may be NULL; copied into settings, not retained here
-    uint32_t width;
+    uint32_t width;  // desktop size in pixels
     uint32_t height;
+    /// Desktop scale as a percentage (100 = 1x, 200 = Retina). Tells Windows
+    /// to size its UI for a pixel-dense frame buffer. 0 means 100.
+    uint32_t scale_percent;
     bool dynamic_resolution; // negotiate the Display Control channel
     bool share_clipboard;
 } crdp_config;
@@ -112,10 +115,11 @@ void crdp_session_send_key_unicode(crdp_session *session, uint16_t flags,
 /// Resends the lock-key state (caps/num/scroll) after a focus change.
 void crdp_session_send_synchronize(crdp_session *session, uint32_t toggle_flags);
 
-/// Requests a new desktop resolution over the Display Control channel. A no-op
-/// unless the session negotiated `dynamic_resolution` and is connected.
+/// Requests a new desktop resolution (in pixels) and scale over the Display
+/// Control channel. A no-op unless the session negotiated `dynamic_resolution`
+/// and is connected. `scale_percent` as in `crdp_config`.
 void crdp_session_request_resolution(crdp_session *session, uint32_t width,
-                                     uint32_t height);
+                                     uint32_t height, uint32_t scale_percent);
 
 /// Translates a macOS virtual key code (NSEvent.keyCode) to an RDP scancode,
 /// returning the KBD_FLAGS_EXTENDED bit in `*extended`. Returns 0 if unmapped.

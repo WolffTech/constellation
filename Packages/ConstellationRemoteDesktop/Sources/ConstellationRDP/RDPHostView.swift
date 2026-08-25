@@ -2,9 +2,10 @@ import AppKit
 import ConstellationRemoteDesktop
 
 /// Hosts the RDP surface in a scroll view and applies the display mode. "Fit"
-/// scales the surface down to the clip view and reports the clip size so a
-/// session with dynamic resolution can ask the server to match it; "actual
-/// size" keeps one remote pixel per point and scrolls.
+/// scales the surface to the clip view and reports the clip size so a session
+/// with dynamic resolution can ask the server to match it; "actual size" keeps
+/// one remote pixel per device pixel and scrolls. The frame buffer is in
+/// pixels; frames here are in points.
 @MainActor
 final class RDPHostView: NSView {
     var displayMode: RemoteDesktopDisplayMode = .fit {
@@ -61,6 +62,14 @@ final class RDPHostView: NSView {
         }
     }
 
+    /// Moving to a display with a different pixel density changes the pixel
+    /// size the desktop should have, even if the point size did not.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        applyDisplayMode()
+        if displayMode == .fit { reportFitSizeIfChanged() }
+    }
+
     private func reportFitSizeIfChanged() {
         let size = fitSize
         guard size.width > 0, size.height > 0 else { return }
@@ -87,7 +96,8 @@ final class RDPHostView: NSView {
         case .actualSize:
             scrollView.hasVerticalScroller = true
             scrollView.hasHorizontalScroller = true
-            document.frame = NSRect(origin: .zero, size: framebufferSize)
+            let scale = window?.backingScaleFactor ?? 1
+            document.frame = NSRect(origin: .zero, size: CGSize(width: framebufferSize.width / scale, height: framebufferSize.height / scale))
         }
     }
 }

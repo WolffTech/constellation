@@ -61,6 +61,7 @@ typedef struct {
     uint16_t code;
     uint32_t a; // synchronize toggle flags, or resolution width
     uint32_t b; // resolution height
+    uint32_t c; // resolution scale percent
 } crdp_command;
 
 #define CRDP_COMMAND_CAPACITY 1024
@@ -77,6 +78,7 @@ struct crdp_session {
     // A resolution requested before the server is ready; sent once it is.
     uint32_t pending_width;
     uint32_t pending_height;
+    uint32_t pending_scale;
     bool disp_ready; // Display Control caps received; layouts accepted now
     volatile bool connected;
     // Tracks the buffer the Swift side last saw, so a GFX ResetGraphics realloc
@@ -137,7 +139,22 @@ static os_log_t crdp_oslog(void) {
     return log;
 }
 
-static void crdp_send_layout(crdp_session *session, uint32_t width, uint32_t height) {
+// MS-RDPEDISP: DesktopScaleFactor is 100..500; DeviceScaleFactor is only 100,
+// 140 or 180 and Windows uses it to pick icon/asset sizes.
+static uint32_t crdp_desktop_scale(uint32_t percent) {
+    if (percent < 100)
+        return 100;
+    return percent > 500 ? 500 : percent;
+}
+
+static uint32_t crdp_device_scale(uint32_t percent) {
+    if (percent >= 180)
+        return 180;
+    return percent >= 140 ? 140 : 100;
+}
+
+static void crdp_send_layout(crdp_session *session, uint32_t width, uint32_t height,
+                             uint32_t scale_percent) {
     DISPLAY_CONTROL_MONITOR_LAYOUT layout = { 0 };
     layout.Flags = DISPLAY_CONTROL_MONITOR_PRIMARY;
     layout.Left = 0;
@@ -145,11 +162,12 @@ static void crdp_send_layout(crdp_session *session, uint32_t width, uint32_t hei
     layout.Width = width;
     layout.Height = height;
     layout.Orientation = ORIENTATION_LANDSCAPE;
-    layout.DesktopScaleFactor = 100;
-    layout.DeviceScaleFactor = 100;
+    layout.DesktopScaleFactor = crdp_desktop_scale(scale_percent);
+    layout.DeviceScaleFactor = crdp_device_scale(scale_percent);
     UINT rc = session->disp->SendMonitorLayout(session->disp, 1, &layout);
     WLog_Print(crdp_log(), rc == CHANNEL_RC_OK ? WLOG_DEBUG : WLOG_WARN,
-               "SendMonitorLayout %" PRIu32 "x%" PRIu32 " -> %" PRIu32, width, height, rc);
+               "SendMonitorLayout %" PRIu32 "x%" PRIu32 " @%" PRIu32 "%% -> %" PRIu32, width, height,
+               layout.DesktopScaleFactor, rc);
 }
 
 // MARK: - Helpers
@@ -286,8 +304,8 @@ static UINT crdp_disp_caps(DispClientContext *disp, UINT32 maxNumMonitors,
         return CHANNEL_RC_OK;
     session->disp_ready = true;
     if (session->pending_width && session->pending_height) {
-        crdp_send_layout(session, session->pending_width, session->pending_height);
-        session->pending_width = session->pending_height = 0;
+        crdp_send_layout(session, session->pending_width, session->pending_height, session->pending_scale);
+        session->pending_width = session->pending_height = session->pending_scale = 0;
     }
     return CHANNEL_RC_OK;
 }
@@ -424,7 +442,8 @@ static DWORD crdp_verify_changed_certificate_ex(freerdp *instance, const char *h
 
 // Runs a resolution request now that we are on the client thread. Holds it
 // until the server's Display Control caps arrive.
-static void crdp_apply_resolution(crdp_session *session, uint32_t width, uint32_t height) {
+static void crdp_apply_resolution(crdp_session *session, uint32_t width, uint32_t height,
+                                  uint32_t scale_percent) {
     if (!session->connected || !session->config.dynamic_resolution)
         return;
     width &= ~1u; // MS-RDPEDISP: even width, 200..8192 per side
@@ -433,9 +452,10 @@ static void crdp_apply_resolution(crdp_session *session, uint32_t width, uint32_
     if (!session->disp || !session->disp->SendMonitorLayout || !session->disp_ready) {
         session->pending_width = width;
         session->pending_height = height;
+        session->pending_scale = scale_percent;
         return;
     }
-    crdp_send_layout(session, width, height);
+    crdp_send_layout(session, width, height, scale_percent);
 }
 
 static void crdp_execute(crdp_session *session, const crdp_command *command) {
@@ -457,7 +477,7 @@ static void crdp_execute(crdp_session *session, const crdp_command *command) {
             freerdp_input_send_synchronize_event(input, command->a);
             break;
         case CRDP_CMD_RESOLUTION:
-            crdp_apply_resolution(session, command->a, command->b);
+            crdp_apply_resolution(session, command->a, command->b, command->c);
             break;
     }
 }
@@ -605,6 +625,10 @@ crdp_session *crdp_session_create(const crdp_config *config, const crdp_callback
     }
     freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, config->width);
     freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, config->height);
+    // The scale rides along in the initial monitor data so a Retina session
+    // logs in with a 200% desktop rather than resizing after the first frame.
+    freerdp_settings_set_uint32(settings, FreeRDP_DesktopScaleFactor, crdp_desktop_scale(config->scale_percent));
+    freerdp_settings_set_uint32(settings, FreeRDP_DeviceScaleFactor, crdp_device_scale(config->scale_percent));
     freerdp_settings_set_uint32(settings, FreeRDP_ColorDepth, 32);
 
     // Software GDI composites everything (legacy bitmaps, RemoteFX and the GFX
@@ -711,10 +735,11 @@ void crdp_session_send_synchronize(crdp_session *session, uint32_t toggle_flags)
     crdp_enqueue(session, (crdp_command){ .type = CRDP_CMD_SYNCHRONIZE, .a = toggle_flags });
 }
 
-void crdp_session_request_resolution(crdp_session *session, uint32_t width, uint32_t height) {
+void crdp_session_request_resolution(crdp_session *session, uint32_t width, uint32_t height,
+                                     uint32_t scale_percent) {
     if (!session || !session->connected || !session->config.dynamic_resolution)
         return;
-    crdp_enqueue(session, (crdp_command){ .type = CRDP_CMD_RESOLUTION, .a = width, .b = height });
+    crdp_enqueue(session, (crdp_command){ .type = CRDP_CMD_RESOLUTION, .a = width, .b = height, .c = scale_percent });
 }
 
 uint8_t crdp_scancode_for_mac_keycode(uint16_t mac_keycode, bool *extended) {
