@@ -142,6 +142,19 @@ static wLog *crdp_log(void) {
     return WLog_Get("com.constellation.rdp");
 }
 
+// FreeRDP's own logger writes to stderr at INFO by default, and its INFO and
+// DEBUG lines carry host names, account names and connection details. Keep it
+// at WARN unless a developer asks for more with WLOG_LEVEL (FreeRDP reads
+// that variable itself when it creates the root logger).
+static void crdp_configure_logging(void) {
+    static bool configured;
+    if (configured)
+        return;
+    configured = true;
+    if (getenv("WLOG_LEVEL") == NULL)
+        WLog_SetLogLevel(WLog_GetRoot(), WLOG_WARN);
+}
+
 static os_log_t crdp_oslog(void) {
     static os_log_t log;
     static bool created;
@@ -761,6 +774,7 @@ static int crdp_client_stop(rdpContext *context) {
 // MARK: - Public API
 
 crdp_session *crdp_session_create(const crdp_config *config, const crdp_callbacks *callbacks) {
+    crdp_configure_logging();
     crdp_session *session = calloc(1, sizeof(*session));
     if (!session)
         return NULL;

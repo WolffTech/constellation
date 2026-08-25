@@ -37,10 +37,15 @@ fi
 echo "Using $("$ZIG" version) at $ZIG"
 echo "Building libghostty ($OPTIMIZE) from $(git -C "$GHOSTTY" rev-parse --short HEAD)"
 cd "$GHOSTTY"
+# Sentry is off: libghostty would otherwise install a process-wide crash
+# handler that writes minidumps (thread stacks included, so possibly a password
+# in flight) under the app's Caches directory. Constellation ships no crash
+# reporter; macOS crash logs are enough. Documented in the 0006 decision note.
 "$ZIG" build \
   -Doptimize="$OPTIMIZE" \
   -Demit-xcframework=true \
   -Demit-macos-app=false \
-  -Dxcframework-target=native
+  -Dxcframework-target=native \
+  -Dsentry=false
 
 echo "Built $GHOSTTY/macos/GhosttyKit.xcframework"
