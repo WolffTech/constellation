@@ -75,20 +75,31 @@ jobs:
       - name: Generate project
         run: xcodegen generate
 
-      - name: Run app and core tests
+      # The scheme's test action also runs every package suite; the terminal
+      # suite opens real surfaces on the runner's window server, and the
+      # network suites skip themselves unless CONSTELLATION_TEST_* variables
+      # point at a live host.
+      - name: Run tests
         run: |
           xcodebuild -project Constellation.xcodeproj -scheme Constellation \
             -destination 'platform=macOS,arch=arm64' \
+            -resultBundlePath build/TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO \
             test
 
-      # Not part of the Xcode scheme; the terminal suite opens real surfaces
-      # and needs the runner's window server. Network suites skip themselves
-      # unless CONSTELLATION_TEST_* variables point at a live host.
-      - name: Run package tests
+      - name: Collect crash reports
+        if: failure()
         run: |
-          for package in ConstellationInfrastructure ConstellationRemoteDesktop ConstellationTerminal; do
-            echo "::group::$package"
-            swift test --package-path "Packages/$package"
-            echo "::endgroup::"
-          done
+          mkdir -p build/DiagnosticReports
+          cp ~/Library/Logs/DiagnosticReports/*.ips build/DiagnosticReports/ 2>/dev/null || true
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-${{ github.run_number }}
+          path: |
+            build/TestResults.xcresult
+            build/DiagnosticReports
+          if-no-files-found: warn
+          retention-days: 7

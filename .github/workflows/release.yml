@@ -72,7 +72,7 @@ jobs:
       - name: Generate project
         run: xcodegen generate
 
-      - name: Run app and core tests
+      - name: Run tests
         run: |
           xcodebuild -project Constellation.xcodeproj -scheme Constellation \
             -destination 'platform=macOS,arch=arm64' \
