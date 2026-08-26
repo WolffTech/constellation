@@ -65,7 +65,7 @@ public final class GhosttyRuntime {
             throw TerminalError.appCreationFailed
         }
         self.app = app
-        ghostty_app_set_focus(app, NSApp.isActive)
+        ghostty_app_set_focus(app, NSApp?.isActive ?? false)
 
         let center = NotificationCenter.default
         observers = [
