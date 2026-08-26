@@ -53,8 +53,19 @@ jobs:
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             build
           app="build/DerivedData/Build/Products/Release/Constellation.app"
-          codesign --force --deep --sign - --options runtime "$app"
+          codesign --force --sign - --options runtime \
+            "$app/Contents/Frameworks/RoyalVNCKit.framework"
+          codesign --force --sign - --options runtime \
+            "$app/Contents/MacOS/constellation-askpass"
+          # Ad-hoc signatures have no shared Team ID. Keep the other hardened
+          # runtime protections while allowing the embedded framework to load.
+          codesign --force --sign - --options runtime \
+            --entitlements .github/test-build.entitlements \
+            "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --entitlements :- "$app" 2>/dev/null \
+            | plutil -extract 'com\.apple\.security\.cs\.disable-library-validation' raw - \
+            | grep -qx true
           mkdir -p dist
           ditto -c -k --keepParent "$app" "dist/Constellation-test-build.zip"
 
