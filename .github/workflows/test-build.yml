@@ -48,6 +48,7 @@ jobs:
             -derivedDataPath build/DerivedData \
             -onlyUsePackageVersionsFromResolvedFile \
             CODE_SIGNING_ALLOWED=NO \
+            ARCHS=arm64 \
             MARKETING_VERSION="0.0.0-test" \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             build
