@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Mitchell Hashimoto and Ghostty contributors
+// SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
+// SPDX-License-Identifier: GPL-3.0-only
+
 import AppKit
 import GhosttyKit
 

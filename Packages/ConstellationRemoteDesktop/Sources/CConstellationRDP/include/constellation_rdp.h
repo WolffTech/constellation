@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
+// SPDX-License-Identifier: GPL-3.0-only
+
 // C bridge over FreeRDP. Every pointer FreeRDP owns and every C callback lives
 // behind this interface; the Swift adapter sees an opaque session, an owned
 // BGRA frame buffer and typed callbacks. Callbacks fire on FreeRDP's client

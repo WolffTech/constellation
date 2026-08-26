@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
+# SPDX-License-Identifier: GPL-3.0-only
+
 # Builds a distributable Constellation.app: Release archive signed with
 # Developer ID and the Hardened Runtime, notarized, stapled, and zipped.
 #

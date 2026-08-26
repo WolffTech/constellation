@@ -40,36 +40,20 @@
     "file": "royalvnckit.txt"
   },
   {
+    "name": "D3DES",
+    "version": "5.09, bundled with RoyalVNCKit",
+    "license": "Public domain with Olivetti and Oracle modifications",
+    "url": "https://github.com/royalapplications/royalvnc",
+    "summary": "DES implementation used by RoyalVNCKit for VNC authentication.",
+    "file": "d3des.txt"
+  },
+  {
     "name": "CryptoSwift",
     "version": "royalapplications fork",
     "license": "zlib",
-    "url": "https://github.com/krzyzanowskim/CryptoSwift",
+    "url": "https://github.com/royalapplications/CryptoSwift",
     "summary": "Cryptography used by RoyalVNCKit for VNC authentication.",
     "file": "cryptoswift.txt"
-  },
-  {
-    "name": "swift-png",
-    "version": "4.5.1",
-    "license": "Apache-2.0",
-    "url": "https://github.com/tayloraswift/swift-png",
-    "summary": "PNG decoding used by RoyalVNCKit.",
-    "file": "swift-png.txt"
-  },
-  {
-    "name": "swift-jpeg",
-    "version": "2.1.0",
-    "license": "Apache-2.0",
-    "url": "https://github.com/tayloraswift/swift-jpeg",
-    "summary": "JPEG decoding used by RoyalVNCKit.",
-    "file": "swift-jpeg.txt"
-  },
-  {
-    "name": "h",
-    "version": "1.0.1",
-    "license": "Apache-2.0",
-    "url": "https://github.com/rarestype/h",
-    "summary": "Dependency of swift-png and swift-jpeg.",
-    "file": "h.txt"
   },
   {
     "name": "GRDB",

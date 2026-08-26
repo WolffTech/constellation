@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
+// SPDX-License-Identifier: GPL-3.0-only
+
 // FreeRDP client wrapped behind constellation_rdp.h. This owns the rdpContext,
 // the client thread and every FreeRDP callback; the Swift adapter never sees a
 // FreeRDP type. The render path is software GDI: FreeRDP paints into

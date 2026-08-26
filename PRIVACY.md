@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech> -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+
 # Privacy
 
 Constellation is a macOS app for opening SSH, VNC and RDP sessions to

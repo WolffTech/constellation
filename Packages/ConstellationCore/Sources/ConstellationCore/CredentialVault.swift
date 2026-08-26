@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
+// SPDX-License-Identifier: GPL-3.0-only
+
 import Foundation
 
 /// A password or passphrase in memory. Not `Codable`, and its printed form is

@@ -1,4 +1,7 @@
 // swift-tools-version: 6.0
+
+// SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
+// SPDX-License-Identifier: GPL-3.0-only
 import PackageDescription
 
 // GhosttyKit.xcframework is a symlink into Vendor/ghostty/macos, produced by

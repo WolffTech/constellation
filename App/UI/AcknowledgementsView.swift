@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
+// SPDX-License-Identifier: GPL-3.0-only
+
 import SwiftUI
 
 /// Third-party notices, read from `Licenses/manifest.json` and the license

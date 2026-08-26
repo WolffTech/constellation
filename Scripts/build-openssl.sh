@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
+# SPDX-License-Identifier: GPL-3.0-only
+
 # Builds the pinned OpenSSL source release for arm64 macOS. FreeRDP links the
 # resulting static libraries into FreeRDPKit, so no OpenSSL dylib ships in the
 # app. Bump OPENSSL_VERSION and OPENSSL_SHA256 together.

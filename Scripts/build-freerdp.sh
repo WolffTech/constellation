@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
+# SPDX-License-Identifier: GPL-3.0-only
+
 # Builds FreeRDP from the pinned Vendor/freerdp submodule as static arm64
 # libraries and wraps them (with OpenSSL) in FreeRDPKit.xcframework. Output:
 #   Vendor/build/freerdp/FreeRDPKit.xcframework  (library only)

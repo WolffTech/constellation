@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Regenerates App/Licenses (manifest.json + license texts) for Help › Acknowledgements.
 
 Run after bumping a dependency, after the native kits have been built (the
@@ -8,12 +11,10 @@ contain, not by hash), the SwiftPM checkouts, the pinned OpenSSL build, and — 
 the few packages that ship no license file — the upstream text over HTTPS.
 """
 import glob
-import io
 import json
 import os
 import re
 import subprocess
-import sys
 import tarfile
 import urllib.request
 
@@ -28,6 +29,8 @@ def run(*args):
 
 
 def read(path):
+    if not os.path.isabs(path):
+        path = os.path.join(ROOT, path)
     with open(path, encoding="utf-8", errors="replace") as f:
         return f.read()
 
@@ -46,12 +49,16 @@ def from_tarball(marker, license_name):
     raise SystemExit(f"no cached Zig package contains {marker}; run Scripts/build-libghostty.sh")
 
 
-def from_checkout(name, file="LICENSE"):
+def checkout_file(name, file="LICENSE"):
     candidates = glob.glob(os.path.join(ROOT, "Packages", "*", ".build", "checkouts", name, file))
     candidates += glob.glob(os.path.join(HOME, "Library", "Developer", "Xcode", "DerivedData", "*", "SourcePackages", "checkouts", name, file))
     if not candidates:
         raise SystemExit(f"SwiftPM checkout for {name} not found; build once first")
-    return read(candidates[0])
+    return candidates[0]
+
+
+def from_checkout(name, file="LICENSE"):
+    return read(checkout_file(name, file))
 
 
 def fetch(url):
@@ -65,6 +72,18 @@ def leading_comment(path):
     if not match:
         raise SystemExit(f"no leading comment in {path}")
     return "\n".join(line.strip(" *") for line in match.group(1).splitlines()).strip() + "\n"
+
+
+def leading_comments(path, count):
+    text = read(path)
+    matches = re.findall(r"/\*(.*?)\*/", text, re.S)[:count]
+    if len(matches) != count:
+        raise SystemExit(f"expected {count} leading comments in {path}")
+    notices = [
+        "\n".join(line.strip(" *") for line in match.splitlines()).strip()
+        for match in matches
+    ]
+    return "\n\n".join(notices) + "\n"
 
 
 def stb_notice(path):
@@ -99,18 +118,12 @@ NOTICES = [
     ("royalvnckit", "RoyalVNCKit", "1.1.0", "MIT", "https://github.com/royalapplications/royalvnc",
      "VNC protocol and framebuffer view behind VNC sessions.",
      lambda: from_checkout("royalvnc")),
-    ("cryptoswift", "CryptoSwift", "royalapplications fork", "zlib", "https://github.com/krzyzanowskim/CryptoSwift",
+    ("d3des", "D3DES", "5.09, bundled with RoyalVNCKit", "Public domain with Olivetti and Oracle modifications", "https://github.com/royalapplications/royalvnc",
+     "DES implementation used by RoyalVNCKit for VNC authentication.",
+     lambda: leading_comments(checkout_file("royalvnc", "Sources/d3des/d3des.c"), 2)),
+    ("cryptoswift", "CryptoSwift", "royalapplications fork", "zlib", "https://github.com/royalapplications/CryptoSwift",
      "Cryptography used by RoyalVNCKit for VNC authentication.",
      lambda: from_checkout("CryptoSwift")),
-    ("swift-png", "swift-png", "4.5.1", "Apache-2.0", "https://github.com/tayloraswift/swift-png",
-     "PNG decoding used by RoyalVNCKit.",
-     lambda: from_checkout("swift-png")),
-    ("swift-jpeg", "swift-jpeg", "2.1.0", "Apache-2.0", "https://github.com/tayloraswift/swift-jpeg",
-     "JPEG decoding used by RoyalVNCKit.",
-     lambda: from_checkout("swift-jpeg")),
-    ("h", "h", "1.0.1", "Apache-2.0", "https://github.com/rarestype/h",
-     "Dependency of swift-png and swift-jpeg.",
-     lambda: from_checkout("h")),
     ("grdb", "GRDB", "7.11.1", "MIT", "https://github.com/groue/GRDB.swift",
      "SQLite access for the machine library and the certificate trust store.",
      lambda: from_checkout("GRDB.swift")),
@@ -209,6 +222,34 @@ def main():
     with open(os.path.join(OUT, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
         f.write("\n")
+    write_third_party_notices(manifest)
+
+
+def write_third_party_notices(manifest):
+    lines = [
+        "<!-- SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech> -->",
+        "<!-- SPDX-License-Identifier: GPL-3.0-only -->",
+        "",
+        "# Third-party software notices",
+        "",
+        "Constellation incorporates the following third-party software. Complete license",
+        "texts are bundled with the app and stored in [`App/Licenses`](App/Licenses).",
+        "",
+    ]
+    for notice in manifest:
+        lines.extend([
+            f"## {notice['name']}",
+            "",
+            notice["summary"],
+            "",
+            f"- Upstream: [{notice['url']}]({notice['url']})",
+            f"- Version: {notice['version']}",
+            f"- License: {notice['license']}",
+            f"- License text: [`{notice['file']}`](App/Licenses/{notice['file']})",
+            "",
+        ])
+    with open(os.path.join(ROOT, "THIRD_PARTY_NOTICES.md"), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
 
 
 if __name__ == "__main__":

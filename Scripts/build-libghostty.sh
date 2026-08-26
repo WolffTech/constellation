@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
+# SPDX-License-Identifier: GPL-3.0-only
+
 # Builds GhosttyKit.xcframework from the pinned Vendor/ghostty submodule using a
 # pinned Zig toolchain downloaded into .tools/. Output:
 #   Vendor/ghostty/macos/GhosttyKit.xcframework

@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech> -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
 <!--
   Flat source artwork for Icon Composer. Optical effects (glass, shadow,
   translucency) belong in the AppIcon.icon document, not in this SVG.

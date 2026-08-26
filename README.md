@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech> -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+
 <p align="center">
   <img src="Assets/AppIcon.png" width="160" alt="Constellation logo">
 </p>
@@ -5,98 +8,58 @@
 <h1 align="center">Constellation</h1>
 
 <p align="center">
-  A native macOS workspace for your remote machines: SSH, RDP, and VNC sessions in one window.
+  A native macOS workspace for SSH, RDP, and VNC sessions in one window.
 </p>
 
-Constellation keeps a library of machines, each with its addresses and
-connection profiles, and opens sessions to them as tabs. SSH runs in terminal
-tabs powered by [libghostty](https://github.com/ghostty-org/ghostty), RDP is
-embedded through [FreeRDP](https://github.com/FreeRDP/FreeRDP), and VNC through
+Constellation saves your remote machines and opens their sessions as tabs. SSH
+uses [libghostty](https://github.com/ghostty-org/ghostty), RDP uses
+[FreeRDP](https://github.com/FreeRDP/FreeRDP), and VNC uses
 [RoyalVNCKit](https://github.com/royalapplications/royalvnc). Passwords and
-passphrases live only in the macOS Keychain.
+passphrases are stored in the macOS Keychain.
 
 > [!NOTE]
-> Constellation does not create a VPN or relay traffic. Your LAN, corporate
-> VPN, or Tailscale network stays responsible for reachability.
+> Constellation does not create a VPN or relay traffic. Connect to your LAN,
+> VPN, or Tailscale network before starting a session.
 
 ## Features
 
-- Save a machine once with several addresses (LAN, VPN, Tailscale) and one or
-  more profiles per protocol
-- SSH tabs with a Metal-rendered terminal, app-managed fonts and themes, and
-  your own OpenSSH configuration, keys, and agent
-- Embedded RDP sessions with NLA, HiDPI rendering, shared clipboard text, and
-  a Trust Store that remembers accepted certificates
-- Embedded VNC sessions, with a hand-off to Apple's Screen Sharing app
-- Keychain-backed credentials, a saved workspace that reopens your tabs, and
-  reconnect without leaking processes
-- Help › Save Support Bundle… collects diagnostics without host names,
-  account names, or secrets
-- Help › Acknowledgements lists every bundled open-source component
+- Multiple addresses and connection profiles for each machine
+- SSH tabs with a Metal-rendered terminal, fonts, themes, and your existing
+  OpenSSH configuration, keys, and agent
+- RDP sessions with NLA, HiDPI rendering, shared clipboard text, and a trust
+  store for accepted certificates
+- VNC sessions in Constellation or Apple's Screen Sharing app
+- Keychain-backed credentials and a workspace that restores open tabs
 
 ## Install
 
 Constellation requires macOS 15 or later on Apple silicon.
 
-1. Download `Constellation-<version>.zip` from [GitHub Releases](https://github.com/WolffTech/constellation/releases) when one is available, or [build from source](#build-from-source).
+1. Download the signed `.zip` from [GitHub Releases](https://github.com/WolffTech/constellation/releases) when one is available, or [build from source](#build-from-source).
 2. Unzip it and move **Constellation.app** to **Applications**.
-3. Open Constellation and add your first machine.
-
-Releases are signed with a Developer ID certificate and notarized by Apple.
-`Constellation-<version>.zip.sha256` beside each download holds its checksum.
+3. Open Constellation from **Applications** and add your first machine.
 
 ## Build from source
 
-You need Xcode 26 or later with its Metal toolchain
-(`xcodebuild -downloadComponent MetalToolchain`) and Homebrew's `cmake` and
-`xcodegen`.
+Install Xcode 26 or later, then run:
 
 ```sh
+brew install cmake xcodegen
+xcodebuild -downloadComponent MetalToolchain
 git clone --recurse-submodules https://github.com/WolffTech/constellation.git
 cd constellation
-Scripts/build-libghostty.sh   # GhosttyKit.xcframework from the pinned Ghostty commit
-Scripts/build-freerdp.sh      # FreeRDPKit.xcframework from the pinned FreeRDP tag
+Scripts/build-libghostty.sh
+Scripts/build-freerdp.sh
 xcodegen generate
 open Constellation.xcodeproj
 ```
 
-`Scripts/build-libghostty.sh` downloads the pinned Zig toolchain into
-`.tools/`. `Scripts/build-freerdp.sh` builds the pinned OpenSSL source release
-before FreeRDP. Rerun either build script after bumping its dependencies.
-`Constellation.xcodeproj` is generated from `project.yml`; edit the spec, not
-the project.
+The build scripts download the pinned Zig toolchain and OpenSSL release, then
+compile the pinned Ghostty and FreeRDP versions.
 
-To run the tests:
+## License
 
-```sh
-xcodebuild -project Constellation.xcodeproj -scheme Constellation \
-  -destination 'platform=macOS,arch=arm64' \
-  -onlyUsePackageVersionsFromResolvedFile test
-swift test --package-path Packages/ConstellationInfrastructure --disable-automatic-resolution
-swift test --package-path Packages/ConstellationRemoteDesktop --disable-automatic-resolution
-swift test --package-path Packages/ConstellationTerminal
-```
-
-The terminal tests open real surfaces and need a window server. Suites that
-talk to a live host skip themselves unless `CONSTELLATION_TEST_*` variables
-point at one.
-
-### Releasing
-
-`Scripts/release.sh <version>` builds a Release archive, signs it with
-Developer ID and the Hardened Runtime, notarizes it, staples the ticket, and
-writes the zip to `build/release/<version>/`. Pushing a `v<version>` tag runs
-the same script on GitHub Actions and publishes the result as a release;
-see `.github/workflows/release.yml` for the secrets it needs.
-
-## Security and privacy
-
-See [`SECURITY.md`](SECURITY.md) for how to report a vulnerability and how
-pinned dependencies are updated, and [`PRIVACY.md`](PRIVACY.md) for what the
-app stores and what leaves your Mac.
-
-## Third-party notices
-
-Bundled open-source components and their licenses are listed in
-[`App/Licenses/manifest.json`](App/Licenses/manifest.json) and shown in the
-app under Help › Acknowledgements.
+Constellation is free software licensed under [GPL-3.0-only](LICENSE).
+Third-party attributions are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and details about the source
+archive included with each release are in [SOURCE.md](SOURCE.md).
