@@ -16,7 +16,7 @@ machines in the app's own process:
 | --- | --- | --- | --- |
 | libghostty (`Vendor/ghostty` submodule) | commit `da5ddcb0` (2026-08-22), built with Zig 0.16.0 | terminal emulation for SSH tabs | https://github.com/ghostty-org/ghostty/releases, https://github.com/ghostty-org/ghostty/security |
 | FreeRDP + WinPR (`Vendor/freerdp` submodule) | tag `3.30.0` | RDP sessions | https://github.com/FreeRDP/FreeRDP/security/advisories, https://github.com/FreeRDP/FreeRDP/releases |
-| OpenSSL (Homebrew `openssl@3`, linked statically into FreeRDPKit) | whatever `brew` installed when `Scripts/build-freerdp.sh` last ran (3.6.3 at the time of writing) | TLS and NLA for RDP | https://openssl-library.org/news/vulnerabilities/ |
+| OpenSSL (source build, linked statically into FreeRDPKit) | LTS release `3.5.8`, archive SHA-256 pinned in `Scripts/build-openssl.sh` | TLS and NLA for RDP | https://openssl-library.org/news/vulnerabilities/ |
 | RoyalVNCKit (Swift package) | revision `92d4427c` (tag 1.1.0) | VNC sessions | https://github.com/royalapplications/royalvnc/releases |
 | GRDB (Swift package) | exact `7.11.1` | SQLite storage | https://github.com/groue/GRDB.swift/releases |
 | OpenSSH | the system `/usr/bin/ssh` | SSH transport | macOS security updates |
@@ -34,8 +34,10 @@ for RDP live in `trust.sqlite`; SSH host keys are OpenSSH's own `known_hosts`.
 2. Move the pin: submodule commit or tag for libghostty and FreeRDP
    (`git -C Vendor/<name> checkout <ref>`), `Package.swift` for RoyalVNCKit
    and GRDB, `ZIG_VERSION`/`ZIG_SHA256` in `Scripts/build-libghostty.sh`
-   when Ghostty's `build.zig.zon` requires a newer Zig, `brew upgrade
-   openssl@3` for OpenSSL.
+   when Ghostty's `build.zig.zon` requires a newer Zig, and
+   `OPENSSL_VERSION`/`OPENSSL_SHA256` in `Scripts/build-openssl.sh` for
+   OpenSSL. Refresh and commit each affected `Package.resolved` after a Swift
+   package change.
 3. Rebuild the native kits: `Scripts/build-libghostty.sh`,
    `Scripts/build-freerdp.sh`. Both are reproducible from the scripts alone.
 4. Run the full test scheme, then the environment-gated live tests against a

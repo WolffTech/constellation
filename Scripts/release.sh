@@ -55,6 +55,7 @@ echo "Archiving $VERSION ($BUILD_NUMBER)..."
 xcodebuild archive \
   -project Constellation.xcodeproj \
   -scheme Constellation \
+  -onlyUsePackageVersionsFromResolvedFile \
   -configuration Release \
   -destination 'generic/platform=macOS' \
   -archivePath "$ARCHIVE" \

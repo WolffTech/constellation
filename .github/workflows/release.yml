@@ -60,7 +60,7 @@ jobs:
             echo "BUILD_NUMBER=$(git rev-list --count HEAD)"
           } >> "$GITHUB_ENV"
 
-      # No cache: a release links whatever OpenSSL Homebrew ships today.
+      # Rebuild release artifacts from the pinned source dependencies.
       - name: Build native libraries
         uses: ./.github/actions/native-libraries
         with:
@@ -76,6 +76,7 @@ jobs:
         run: |
           xcodebuild -project Constellation.xcodeproj -scheme Constellation \
             -destination 'platform=macOS,arch=arm64' \
+            -onlyUsePackageVersionsFromResolvedFile \
             CODE_SIGNING_ALLOWED=NO \
             test
 

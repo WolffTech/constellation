@@ -48,8 +48,8 @@ Releases are signed with a Developer ID certificate and notarized by Apple.
 ## Build from source
 
 You need Xcode 26 or later with its Metal toolchain
-(`xcodebuild -downloadComponent MetalToolchain`) and Homebrew's `cmake`,
-`openssl@3`, and `xcodegen`.
+(`xcodebuild -downloadComponent MetalToolchain`) and Homebrew's `cmake` and
+`xcodegen`.
 
 ```sh
 git clone --recurse-submodules https://github.com/WolffTech/constellation.git
@@ -61,7 +61,8 @@ open Constellation.xcodeproj
 ```
 
 `Scripts/build-libghostty.sh` downloads the pinned Zig toolchain into
-`.tools/`. Rerun either build script after bumping its submodule.
+`.tools/`. `Scripts/build-freerdp.sh` builds the pinned OpenSSL source release
+before FreeRDP. Rerun either build script after bumping its dependencies.
 `Constellation.xcodeproj` is generated from `project.yml`; edit the spec, not
 the project.
 
@@ -69,9 +70,10 @@ To run the tests:
 
 ```sh
 xcodebuild -project Constellation.xcodeproj -scheme Constellation \
-  -destination 'platform=macOS,arch=arm64' test
-swift test --package-path Packages/ConstellationInfrastructure
-swift test --package-path Packages/ConstellationRemoteDesktop
+  -destination 'platform=macOS,arch=arm64' \
+  -onlyUsePackageVersionsFromResolvedFile test
+swift test --package-path Packages/ConstellationInfrastructure --disable-automatic-resolution
+swift test --package-path Packages/ConstellationRemoteDesktop --disable-automatic-resolution
 swift test --package-path Packages/ConstellationTerminal
 ```
 

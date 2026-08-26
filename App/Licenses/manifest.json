@@ -17,7 +17,7 @@
   },
   {
     "name": "OpenSSL",
-    "version": "3.6.3",
+    "version": "3.5.8",
     "license": "Apache-2.0",
     "url": "https://openssl-library.org",
     "summary": "TLS and cryptography for RDP, linked statically into the FreeRDP kit.",

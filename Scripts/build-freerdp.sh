@@ -3,9 +3,9 @@
 # libraries and wraps them (with OpenSSL) in FreeRDPKit.xcframework. Output:
 #   Vendor/build/freerdp/FreeRDPKit.xcframework  (library only)
 #   Vendor/build/freerdp/headers                 (freerdp/ and winpr/)
-# Needs Homebrew cmake and openssl@3 (`brew install cmake openssl@3`) and the
-# Xcode command line tools. Rerun after bumping the submodule. LTO is off
-# because xcodebuild cannot wrap bitcode archives in an xcframework.
+# Needs CMake and the Xcode command line tools. `build-openssl.sh` downloads
+# and builds the pinned OpenSSL release. Rerun after bumping either dependency.
+# LTO is off because xcodebuild cannot wrap bitcode archives in an xcframework.
 # WITH_INTERNAL_MD4/MD5/RC4 compile WinPR's own hash/cipher code so NTLM (NLA)
 # never needs OpenSSL 3's legacy provider, which is a separate dylib that a
 # hardened-runtime app cannot dlopen — without this, NLA fails after the TLS
@@ -26,21 +26,20 @@ PREFIX="$ROOT/Vendor/build/freerdp"
 XCFRAMEWORK="$PREFIX/FreeRDPKit.xcframework"
 DEPLOYMENT_TARGET="15.0"
 BUILD_TYPE="${FREERDP_BUILD_TYPE:-Release}"
+JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 if [[ ! -f "$SRC/CMakeLists.txt" ]]; then
   echo "Vendor/freerdp is empty. Run: git submodule update --init" >&2
   exit 1
 fi
 command -v cmake >/dev/null || { echo "cmake not found (brew install cmake)" >&2; exit 1; }
-OPENSSL="$(brew --prefix openssl@3 2>/dev/null || true)"
-if [[ ! -f "$OPENSSL/lib/libssl.a" ]]; then
-  echo "openssl@3 static libraries not found (brew install openssl@3)" >&2
-  exit 1
-fi
+"$ROOT/Scripts/build-openssl.sh"
+OPENSSL="$ROOT/Vendor/build/openssl"
 
 echo "Using $(cmake --version | head -1), $(clang --version | head -1)"
 echo "Building FreeRDP ($BUILD_TYPE) from $(git -C "$SRC" rev-parse --short HEAD) with OpenSSL at $OPENSSL"
 
+rm -rf "$BUILD" "$PREFIX"
 cmake -S "$SRC" -B "$BUILD" \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
@@ -88,7 +87,7 @@ cmake -S "$SRC" -B "$BUILD" \
   -DCHANNEL_PARALLEL=OFF \
   -DCHANNEL_PRINTER=OFF
 
-cmake --build "$BUILD" --parallel "$(sysctl -n hw.ncpu)"
+cmake --build "$BUILD" --parallel "$JOBS"
 cmake --install "$BUILD" >/dev/null
 
 # One archive keeps SwiftPM's binary target simple: FreeRDP, WinPR and the

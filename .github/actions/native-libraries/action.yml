@@ -7,8 +7,8 @@ description: >-
 inputs:
   use-cache:
     description: >-
-      Restore and save the built xcframeworks. Release builds pass "false" so
-      they always link the OpenSSL that Homebrew currently ships.
+      Restore and save the built xcframeworks. Release builds pass "false" to
+      rebuild every native dependency from its pinned source.
     default: "true"
 
 runs:
@@ -50,7 +50,7 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: Vendor/build/freerdp
-        key: freerdp-${{ runner.arch }}-${{ steps.keys.outputs.xcode }}-${{ steps.keys.outputs.freerdp }}-${{ hashFiles('Scripts/build-freerdp.sh') }}
+        key: freerdp-${{ runner.arch }}-${{ steps.keys.outputs.xcode }}-${{ steps.keys.outputs.freerdp }}-${{ hashFiles('Scripts/build-freerdp.sh', 'Scripts/build-openssl.sh') }}
 
     - name: Build FreeRDP
       if: steps.freerdp.outputs.cache-hit != 'true'
@@ -59,7 +59,7 @@ runs:
         HOMEBREW_NO_AUTO_UPDATE: "1"
         HOMEBREW_NO_INSTALL_CLEANUP: "1"
       run: |
-        brew install cmake openssl@3
+        brew install cmake
         Scripts/build-freerdp.sh
 
     - name: Check xcframeworks

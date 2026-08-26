@@ -84,6 +84,7 @@ jobs:
           xcodebuild -project Constellation.xcodeproj -scheme Constellation \
             -destination 'platform=macOS,arch=arm64' \
             -resultBundlePath build/TestResults.xcresult \
+            -onlyUsePackageVersionsFromResolvedFile \
             CODE_SIGNING_ALLOWED=NO \
             test
 

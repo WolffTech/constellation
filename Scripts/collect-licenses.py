@@ -4,7 +4,7 @@
 Run after bumping a dependency, after the native kits have been built (the
 Zig package cache and the SwiftPM checkouts must exist). Sources are the
 submodules, Zig's package cache (matched by a file each package is known to
-contain, not by hash), the SwiftPM checkouts, Homebrew's OpenSSL, and — for
+contain, not by hash), the SwiftPM checkouts, the pinned OpenSSL build, and — for
 the few packages that ship no license file — the upstream text over HTTPS.
 """
 import glob
@@ -75,13 +75,10 @@ def stb_notice(path):
     return "\n".join(line.lstrip("/ ") for line in text[index:].splitlines()).strip() + "\n"
 
 
-def brew_prefix(formula):
-    return run("brew", "--prefix", formula)
-
-
 ghostty_commit = run("git", "-C", "Vendor/ghostty", "rev-parse", "--short", "HEAD")
 freerdp_tag = run("git", "-C", "Vendor/freerdp", "describe", "--tags")
-openssl_version = os.path.basename(os.path.realpath(brew_prefix("openssl@3")))
+openssl_prefix = os.path.join(ROOT, "Vendor", "build", "openssl")
+openssl_version = run(os.path.join(openssl_prefix, "bin", "openssl"), "version").split()[1]
 
 GHOSTTY = "https://github.com/ghostty-org/ghostty"
 
@@ -95,7 +92,7 @@ NOTICES = [
      lambda: read("Vendor/freerdp/LICENSE")),
     ("openssl", "OpenSSL", openssl_version, "Apache-2.0", "https://openssl-library.org",
      "TLS and cryptography for RDP, linked statically into the FreeRDP kit.",
-     lambda: read(os.path.join(brew_prefix("openssl@3"), "LICENSE.txt"))),
+     lambda: read(os.path.join(openssl_prefix, "LICENSE.txt"))),
     ("md4-md5", "MD4 and MD5 (Solar Designer)", "bundled with WinPR", "Public domain", "https://openwall.info/wiki/people/solar/software/public-domain-source-code/md5",
      "Hash implementations WinPR compiles in so NTLM authentication does not need OpenSSL's legacy provider.",
      lambda: leading_comment("Vendor/freerdp/winpr/libwinpr/crypto/md5.c")),
