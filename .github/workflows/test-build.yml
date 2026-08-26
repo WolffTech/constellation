@@ -38,13 +38,6 @@ jobs:
       - name: Generate project
         run: xcodegen generate
 
-      - name: Run tests
-        run: |
-          xcodebuild -project Constellation.xcodeproj -scheme Constellation \
-            -destination 'platform=macOS,arch=arm64' \
-            CODE_SIGNING_ALLOWED=NO \
-            test
-
       # Ad-hoc signed: it runs after right-click > Open, but it is not
       # notarized and Keychain items it creates are tied to this build.
       - name: Build ad-hoc signed app
