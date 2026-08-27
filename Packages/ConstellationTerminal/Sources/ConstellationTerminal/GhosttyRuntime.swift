@@ -14,6 +14,10 @@ public final class GhosttyRuntime {
     nonisolated(unsafe) private(set) var app: ghostty_app_t?
     private var config: GhosttyConfig
     private var observers: [NSObjectProtocol] = []
+    private var appearanceObserver: NSKeyValueObservation?
+    /// Live surfaces, so a color scheme change reaches each one: libghostty
+    /// keeps the scheme per surface and does not fan it out from the app.
+    private let surfaceViews = NSHashTable<GhosttySurfaceView>.weakObjects()
 
     public init(appearance: TerminalAppearance) throws {
         try Self.initializeLibrary()
@@ -33,10 +37,11 @@ public final class GhosttyRuntime {
             }
             CFRunLoopWakeUp(CFRunLoopGetMain())
         }
-        runtime.action_cb = { _, target, action in
+        runtime.action_cb = { app, target, action in
             MainActor.assumeIsolated {
-                guard let view = GhosttySurfaceView.from(target: target) else { return false }
-                return view.handle(action: action)
+                guard let app, let userdata = ghostty_app_userdata(app) else { return false }
+                let runtime = Unmanaged<GhosttyRuntime>.fromOpaque(userdata).takeUnretainedValue()
+                return runtime.handle(action: action, target: target)
             }
         }
         runtime.read_clipboard_cb = { userdata, location, state in
@@ -69,6 +74,11 @@ public final class GhosttyRuntime {
         }
         self.app = app
         ghostty_app_set_focus(app, NSApp?.isActive ?? false)
+        // `.initial` reports the scheme before the first surface exists, so new
+        // surfaces inherit the right one from the app.
+        appearanceObserver = NSApplication.shared.observe(\.effectiveAppearance, options: [.initial, .new]) { [weak self] app, _ in
+            MainActor.assumeIsolated { self?.setColorScheme(dark: app.effectiveAppearance.isDark) }
+        }
 
         let center = NotificationCenter.default
         observers = [
@@ -85,8 +95,46 @@ public final class GhosttyRuntime {
     }
 
     isolated deinit {
+        appearanceObserver?.invalidate()
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         if let app { ghostty_app_free(app) }
+    }
+
+    func register(_ view: GhosttySurfaceView) {
+        surfaceViews.add(view)
+    }
+
+    /// Tells libghostty which side of a `light:…,dark:…` theme pair to use.
+    /// Each surface then asks for its config back through `reload_config`.
+    func setColorScheme(dark: Bool) {
+        guard let app else { return }
+        let scheme = dark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT
+        ghostty_app_set_color_scheme(app, scheme)
+        for view in surfaceViews.allObjects {
+            guard let surface = view.surface else { continue }
+            ghostty_surface_set_color_scheme(surface, scheme)
+        }
+    }
+
+    private func handle(action: ghostty_action_s, target: ghostty_target_s) -> Bool {
+        // libghostty never re-reads files itself: after a scheme change it asks
+        // for the current config back and applies its conditional state to it.
+        if action.tag == GHOSTTY_ACTION_RELOAD_CONFIG {
+            switch target.tag {
+            case GHOSTTY_TARGET_APP:
+                guard let app else { return false }
+                ghostty_app_update_config(app, config.handle)
+                return true
+            case GHOSTTY_TARGET_SURFACE:
+                guard let surface = target.target.surface else { return false }
+                ghostty_surface_update_config(surface, config.handle)
+                return true
+            default:
+                return false
+            }
+        }
+        guard let view = GhosttySurfaceView.from(target: target) else { return false }
+        return view.handle(action: action)
     }
 
     public func makeSession(command: TerminalCommand) throws -> GhosttyTerminalSession {
@@ -128,5 +176,11 @@ public final class GhosttyRuntime {
         let status = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
         guard status == 0 else { throw TerminalError.libraryInitFailed(status) }
         libraryInitialized = true
+    }
+}
+
+extension NSAppearance {
+    var isDark: Bool {
+        bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
     }
 }

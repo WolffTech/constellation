@@ -31,6 +31,9 @@ public final class GhosttySurfaceView: NSView {
 
     private(set) var cellSize: CGSize = .zero
     private(set) var focused = false
+    /// Background of the configuration libghostty last applied to this
+    /// surface, after theme and light/dark resolution.
+    public private(set) var backgroundColor: NSColor?
     private var currentCursor: NSCursor = .iBeam
 
     // Keyboard and IME state; see GhosttySurfaceView+Keyboard.swift.
@@ -51,6 +54,7 @@ public final class GhosttySurfaceView: NSView {
         }
         guard let created else { throw TerminalError.surfaceCreationFailed }
         surface = created
+        runtime.register(self)
         updateTrackingAreas()
     }
 
@@ -363,9 +367,21 @@ public final class GhosttySurfaceView: NSView {
         case GHOSTTY_ACTION_OPEN_URL:
             return openURL(action.action.open_url)
 
+        case GHOSTTY_ACTION_CONFIG_CHANGE:
+            backgroundColor = Self.background(of: action.action.config_change.config)
+            return true
+
         default:
             return false
         }
+    }
+
+    private static func background(of config: ghostty_config_t?) -> NSColor? {
+        guard let config else { return nil }
+        var color = ghostty_config_color_s()
+        let key = "background"
+        guard ghostty_config_get(config, &color, key, UInt(key.utf8.count)) else { return nil }
+        return NSColor(srgbRed: CGFloat(color.r) / 255, green: CGFloat(color.g) / 255, blue: CGFloat(color.b) / 255, alpha: 1)
     }
 
     private func openURL(_ request: ghostty_action_open_url_s) -> Bool {

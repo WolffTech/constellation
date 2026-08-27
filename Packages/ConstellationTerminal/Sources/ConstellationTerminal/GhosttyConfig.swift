@@ -96,11 +96,23 @@ enum GhosttyConfigText {
             if let family = appearance.fontFamily, !family.isEmpty {
                 lines.append("font-family = \(family)")
             }
-            if let theme = appearance.theme, !theme.isEmpty {
+            if let theme = themeValue(appearance) {
                 lines.append("theme = \(theme)")
             }
         }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// Ghostty follows the system appearance only for a `light:…,dark:…` pair.
+    private static func themeValue(_ appearance: TerminalAppearance) -> String? {
+        let light = appearance.theme.flatMap { $0.isEmpty ? nil : $0 }
+        let dark = appearance.darkTheme.flatMap { $0.isEmpty ? nil : $0 }
+        switch (light, dark) {
+        case let (light?, dark?) where light != dark: return "light:\(light),dark:\(dark)"
+        case let (light?, _): return light
+        case let (nil, dark?): return dark
+        case (nil, nil): return nil
+        }
     }
 
     private static func formatNumber(_ value: Double) -> String {

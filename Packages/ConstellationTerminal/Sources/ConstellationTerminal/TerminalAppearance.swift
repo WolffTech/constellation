@@ -12,7 +12,11 @@ public struct TerminalAppearance: Sendable, Equatable, Codable {
     public var fontFamily: String?
     public var fontSize: Double
     /// A Ghostty built-in theme name. `nil` uses libghostty's default colors.
+    /// When `darkTheme` is also set, this is the light-mode theme.
     public var theme: String?
+    /// Theme used while the system is in dark mode. `nil` keeps `theme` in
+    /// both modes.
+    public var darkTheme: String?
     public var scrollbackLimitBytes: Int
     /// Treat Option as Alt (Meta) so `Option-B`-style shell bindings work.
     public var optionAsAlt: Bool
@@ -26,6 +30,7 @@ public struct TerminalAppearance: Sendable, Equatable, Codable {
         fontFamily: String? = nil,
         fontSize: Double = 13,
         theme: String? = nil,
+        darkTheme: String? = nil,
         scrollbackLimitBytes: Int = 10_000_000,
         optionAsAlt: Bool = true,
         usesGhosttyConfig: Bool = false
@@ -33,6 +38,7 @@ public struct TerminalAppearance: Sendable, Equatable, Codable {
         self.fontFamily = fontFamily
         self.fontSize = fontSize
         self.theme = theme
+        self.darkTheme = darkTheme
         self.scrollbackLimitBytes = scrollbackLimitBytes
         self.optionAsAlt = optionAsAlt
         self.usesGhosttyConfig = usesGhosttyConfig
@@ -40,12 +46,13 @@ public struct TerminalAppearance: Sendable, Equatable, Codable {
 
     public static let `default` = TerminalAppearance()
 
-    // Settings saved before `usesGhosttyConfig` existed lack the key.
+    // Settings saved before `darkTheme` and `usesGhosttyConfig` existed lack the keys.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         fontFamily = try container.decodeIfPresent(String.self, forKey: .fontFamily)
         fontSize = try container.decode(Double.self, forKey: .fontSize)
         theme = try container.decodeIfPresent(String.self, forKey: .theme)
+        darkTheme = try container.decodeIfPresent(String.self, forKey: .darkTheme)
         scrollbackLimitBytes = try container.decode(Int.self, forKey: .scrollbackLimitBytes)
         optionAsAlt = try container.decode(Bool.self, forKey: .optionAsAlt)
         usesGhosttyConfig = try container.decodeIfPresent(Bool.self, forKey: .usesGhosttyConfig) ?? false

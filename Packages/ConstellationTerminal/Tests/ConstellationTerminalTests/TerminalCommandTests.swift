@@ -48,6 +48,20 @@ struct GhosttyConfigTextTests {
         #expect(text.contains("theme = Catppuccin Mocha\n"))
     }
 
+    @Test func rendersLightDarkPairOnlyWhenThemesDiffer() {
+        var appearance = TerminalAppearance.default
+        appearance.theme = "Rose Pine Dawn"
+        appearance.darkTheme = "Rose Pine"
+        #expect(GhosttyConfigText.render(appearance).contains("theme = light:Rose Pine Dawn,dark:Rose Pine\n"))
+
+        appearance.darkTheme = "Rose Pine Dawn"
+        #expect(GhosttyConfigText.render(appearance).contains("theme = Rose Pine Dawn\n"))
+
+        appearance.theme = nil
+        appearance.darkTheme = "Rose Pine"
+        #expect(GhosttyConfigText.render(appearance).contains("theme = Rose Pine\n"))
+    }
+
     @Test func ghosttyConfigModeLeavesAppearanceKeysToTheUserButKeepsOwnedBehavior() {
         var appearance = TerminalAppearance.default
         appearance.fontFamily = "JetBrains Mono"

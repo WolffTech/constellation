@@ -19,7 +19,8 @@ struct TerminalSettingsStoreTests {
         store.update {
             $0.fontFamily = "JetBrains Mono"
             $0.fontSize = 15
-            $0.theme = "Catppuccin Mocha"
+            $0.theme = "Catppuccin Latte"
+            $0.darkTheme = "Catppuccin Mocha"
             $0.scrollbackLimitBytes = 50_000_000
         }
 

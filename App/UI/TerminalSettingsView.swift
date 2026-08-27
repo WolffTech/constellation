@@ -47,11 +47,17 @@ struct TerminalSettingsView: View {
                 Section("Colors") {
                     if themes.isEmpty {
                         TextField("Theme", text: themeText, prompt: Text("Ghostty theme name"))
+                        TextField("Dark mode theme", text: darkThemeText, prompt: Text("Same as light"))
                     } else {
                         Picker("Theme", selection: theme) {
                             Text("Ghostty default").tag(String?.none)
                             Divider()
                             ForEach(themeChoices, id: \.self) { Text($0).tag(String?.some($0)) }
+                        }
+                        Picker("Dark mode theme", selection: darkTheme) {
+                            Text("Same as light").tag(String?.none)
+                            Divider()
+                            ForEach(darkThemeChoices, id: \.self) { Text($0).tag(String?.some($0)) }
                         }
                     }
                 }
@@ -103,6 +109,10 @@ struct TerminalSettingsView: View {
         including(settings.appearance.theme, in: themes)
     }
 
+    private var darkThemeChoices: [String] {
+        including(settings.appearance.darkTheme, in: themes)
+    }
+
     private func including(_ current: String?, in choices: [String]) -> [String] {
         guard let current, !current.isEmpty, !choices.contains(current) else { return choices }
         return [current] + choices
@@ -130,5 +140,17 @@ struct TerminalSettingsView: View {
         Binding(
             get: { settings.appearance.theme ?? "" },
             set: { value in settings.update { $0.theme = value.isEmpty ? nil : value } })
+    }
+
+    private var darkTheme: Binding<String?> {
+        Binding(
+            get: { settings.appearance.darkTheme },
+            set: { value in settings.update { $0.darkTheme = value } })
+    }
+
+    private var darkThemeText: Binding<String> {
+        Binding(
+            get: { settings.appearance.darkTheme ?? "" },
+            set: { value in settings.update { $0.darkTheme = value.isEmpty ? nil : value } })
     }
 }
