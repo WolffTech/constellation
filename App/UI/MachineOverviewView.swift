@@ -11,6 +11,7 @@ struct WorkspaceDetailView: View {
     let store: MachineStore
     let sessions: SessionCoordinator
     let ui: UIState
+    @Environment(ShortcutSettingsStore.self) private var shortcuts
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,7 +27,8 @@ struct WorkspaceDetailView: View {
                 ContentUnavailableView(
                     "No Machine Selected",
                     systemImage: "server.rack",
-                    description: Text("Choose a machine in the sidebar, or press ⌘N to add one."))
+                    description: Text(shortcuts.hint(for: .newMachine).map { "Choose a machine in the sidebar, or press \($0) to add one." }
+                        ?? "Choose a machine in the sidebar, or add one from the File menu."))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -36,6 +38,7 @@ struct WorkspaceDetailView: View {
 private struct SessionTabBar: View {
     let sessions: SessionCoordinator
     let ui: UIState
+    @Environment(ShortcutSettingsStore.self) private var shortcuts
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -48,7 +51,7 @@ private struct SessionTabBar: View {
                     Button { ui.showsQuickConnect = true } label: { Image(systemName: "plus") }
                         .buttonStyle(.borderless)
                         .padding(.horizontal, 8)
-                        .help("Quick Connect (⌘K)")
+                        .help("Quick Connect" + shortcuts.hintSuffix(for: .quickConnect))
                         .accessibilityLabel("Quick Connect")
                 }
                 .padding(.horizontal, 7)
@@ -144,6 +147,7 @@ private struct SessionActions: View {
     let sessions: SessionCoordinator
     let ui: UIState
     var includesClose = false
+    @Environment(ShortcutSettingsStore.self) private var shortcuts
 
     var body: some View {
         if let machineID = summary.machineID {
@@ -169,11 +173,11 @@ private struct SessionActions: View {
             .help("Disconnect")
         } else {
             Button(action: reconnect) { Label("Reconnect", systemImage: "arrow.clockwise") }
-                .help("Reconnect (⌘R)")
+                .help("Reconnect" + shortcuts.hintSuffix(for: .reconnect))
         }
         if sessions.remoteDesktop(for: summary.id) != nil {
             Picker("Display", selection: Binding(
-                get: { summary.displayMode },
+                get: { summary.displayMode ?? .fit },
                 set: { sessions.setDisplayMode($0, for: summary.id) })) {
                 Label("Fit to Window", systemImage: "arrow.down.right.and.arrow.up.left").tag(RemoteDesktopDisplayMode.fit)
                 Label("Actual Size", systemImage: "1.magnifyingglass").tag(RemoteDesktopDisplayMode.actualSize)

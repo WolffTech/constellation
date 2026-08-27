@@ -240,6 +240,22 @@ struct SessionCoordinatorTests {
         #expect(coordinator.sessions.first?.displayMode == .actualSize)
     }
 
+    @Test func driversChooseTheInitialDisplayModeAndUserChoicesOutliveReconnects() async throws {
+        let (coordinator, library, machine, vncDriver) = try await coordinatorWithVNCMachine(defaultDisplayMode: .actualSize)
+        let profile = try #require(await library.snapshot().profiles(for: machine.id).first)
+        let id = try await coordinator.open(profileID: profile.id)
+
+        #expect(vncDriver.sessions.last?.displayMode == .actualSize)
+        #expect(coordinator.sessions.first?.displayMode == .actualSize)
+
+        coordinator.setDisplayMode(.fit, for: id)
+        try await coordinator.reconnect(sessionID: id)
+
+        #expect(vncDriver.sessions.count == 2)
+        #expect(vncDriver.sessions.last?.displayMode == .fit)
+        #expect(coordinator.sessions.first?.displayMode == .fit)
+    }
+
     @Test func vncWithoutADriverFailsClearly() async throws {
         let library = try GRDBMachineLibrary.inMemory()
         let machine = Machine(name: "screen")
@@ -315,13 +331,13 @@ struct SessionCoordinatorTests {
         #expect(coordinator.sessions.first?.state == .failed(.unsupportedProtocol(.rdp)))
     }
 
-    private func coordinatorWithVNCMachine() async throws -> (SessionCoordinator, GRDBMachineLibrary, Machine, StubVNCDriver) {
+    private func coordinatorWithVNCMachine(defaultDisplayMode: RemoteDesktopDisplayMode = .fit) async throws -> (SessionCoordinator, GRDBMachineLibrary, Machine, StubVNCDriver) {
         let library = try GRDBMachineLibrary.inMemory()
         let machine = Machine(name: "screen")
         let address = MachineAddress(machineID: machine.id, label: "", host: "vnc.box")
         let profile = VNCProfile(machineID: machine.id, username: "nick", port: 5901, sharesClipboard: true)
         try await library.save(.batch([.upsertMachine(machine), .upsertAddress(address), .upsertProfile(.vnc(profile))]))
-        let vncDriver = StubVNCDriver()
+        let vncDriver = StubVNCDriver(defaultDisplayMode: defaultDisplayMode)
         let coordinator = SessionCoordinator(
             library: library,
             prober: StubProber(results: ["vnc.box": true]),
@@ -412,12 +428,18 @@ private final class StubTerminal: TerminalSession {
 
 @MainActor
 private final class StubVNCDriver: VNCSessionDriving {
+    private let defaultDisplayMode: RemoteDesktopDisplayMode
     private(set) var requests: [VNCSessionRequest] = []
     private(set) var sessions: [StubRemoteDesktopSession] = []
+
+    init(defaultDisplayMode: RemoteDesktopDisplayMode = .fit) {
+        self.defaultDisplayMode = defaultDisplayMode
+    }
 
     func start(_ request: VNCSessionRequest) throws -> any RemoteDesktopSession {
         requests.append(request)
         let session = StubRemoteDesktopSession()
+        session.displayMode = defaultDisplayMode
         sessions.append(session)
         return session
     }

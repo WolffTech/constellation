@@ -16,6 +16,7 @@ struct MachineSidebar: View {
     let ui: UIState
     let expansion: SidebarExpansionStore
     let trustedCertificates: TrustedCertificatesModel
+    @Environment(ShortcutSettingsStore.self) private var shortcuts
     @Binding var searchText: String
     let onDelete: (Machine) -> Void
 
@@ -47,12 +48,13 @@ struct MachineSidebar: View {
         .toolbar {
             ToolbarItem {
                 Button { ui.editor = .new } label: { Label("New Machine", systemImage: "plus") }
-                    .help("New Machine (⌘N)")
+                    .help("New Machine" + shortcuts.hintSuffix(for: .newMachine))
             }
         }
         .overlay {
             if store.snapshot.machines.isEmpty {
-                ContentUnavailableView("No Machines", systemImage: "server.rack", description: Text("Press ⌘N to add one."))
+                ContentUnavailableView("No Machines", systemImage: "server.rack",
+                                       description: Text(shortcuts.hint(for: .newMachine).map { "Press \($0) to add one." } ?? "Add one from the File menu."))
             } else if filtered.isEmpty {
                 ContentUnavailableView.search(text: searchText)
             }

@@ -39,7 +39,7 @@ public enum RemoteDesktopSessionEvent: Sendable, Equatable {
 }
 
 /// How the remote framebuffer maps onto the host view.
-public enum RemoteDesktopDisplayMode: Sendable, Equatable, CaseIterable {
+public enum RemoteDesktopDisplayMode: String, Sendable, Codable, CaseIterable {
     /// Scale down to fit the view, never up; centred. Protocols that support
     /// dynamic resolution ask the remote to match the view instead.
     case fit

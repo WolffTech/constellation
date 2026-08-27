@@ -21,6 +21,9 @@ final class CompositionRoot {
     private(set) var trustedCertificates: TrustedCertificatesModel?
     let ui = UIState()
     let terminalSettings: TerminalSettingsStore
+    let shortcuts: ShortcutSettingsStore
+    let vncSettings: VNCSettingsStore
+    let rdpSettings: RDPSettingsStore
     let sidebarExpansion: SidebarExpansionStore
 
     private var runtime: GhosttyRuntime?
@@ -28,6 +31,9 @@ final class CompositionRoot {
 
     init(defaults: UserDefaults = .standard) {
         terminalSettings = TerminalSettingsStore(defaults: defaults)
+        shortcuts = ShortcutSettingsStore(defaults: defaults)
+        vncSettings = VNCSettingsStore(defaults: defaults)
+        rdpSettings = RDPSettingsStore(defaults: defaults)
         sidebarExpansion = SidebarExpansionStore(defaults: defaults)
         do {
             let vault = KeychainCredentialVault()
@@ -48,12 +54,14 @@ final class CompositionRoot {
             }
             self.askPass = askPass
             let driver = GhosttySSHSessionDriver(runtime: runtime, askPass: askPass)
+            let vncSettings = vncSettings
+            let rdpSettings = rdpSettings
             sessions = SessionCoordinator(
                 library: library,
                 prober: TCPAddressProber(),
                 driver: driver,
-                vncDriver: RoyalVNCSessionDriver(vault: vault),
-                rdpDriver: FreeRDPSessionDriver(vault: vault, trustStore: trustStore))
+                vncDriver: RoyalVNCSessionDriver(vault: vault, settings: { vncSettings.value }),
+                rdpDriver: FreeRDPSessionDriver(vault: vault, trustStore: trustStore, settings: { rdpSettings.value }))
         } catch {
             startupError = error.localizedDescription
         }

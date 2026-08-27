@@ -24,6 +24,26 @@ struct RoyalVNCSessionTests {
         #expect(!refused.isAuthenticationFailure)
     }
 
+    @Test func configurationMapsOntoRoyalVNCKitSettings() {
+        let configuration = VNCSessionConfiguration(
+            host: "vnc.box", port: 5901, sharesClipboard: true,
+            colorDepth: .bits16, sharesSession: false, keyboardMode: .forwardAllShortcuts)
+        let settings = RoyalVNCSession.connectionSettings(for: configuration)
+
+        #expect(settings.hostname == "vnc.box")
+        #expect(settings.port == 5901)
+        #expect(settings.isClipboardRedirectionEnabled)
+        #expect(settings.colorDepth == .depth16Bit)
+        #expect(!settings.isShared)
+        #expect(settings.inputMode == .forwardKeyboardShortcutsEvenIfInUseLocally)
+
+        let defaults = RoyalVNCSession.connectionSettings(for: VNCSessionConfiguration(host: "vnc.box"))
+        #expect(defaults.colorDepth == .depth24Bit)
+        #expect(defaults.isShared)
+        #expect(defaults.inputMode == .forwardKeyboardShortcutsIfNotInUseLocally)
+        #expect(RoyalVNCSession.connectionSettings(for: VNCSessionConfiguration(host: "h", keyboardMode: .local)).inputMode == .none)
+    }
+
     @Test func connectingToAClosedPortEndsDisconnectedWithAFailure() async throws {
         let session = RoyalVNCSession(configuration: VNCSessionConfiguration(host: "127.0.0.1", port: 1)) { _ in nil }
         var states: [RemoteDesktopSessionState] = []

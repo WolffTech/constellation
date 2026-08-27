@@ -12,6 +12,7 @@
 #include <freerdp/freerdp.h>
 #include <freerdp/client.h>
 #include <freerdp/client/channels.h>
+#include <freerdp/client/cmdline.h>
 #include <freerdp/client/rdpgfx.h>
 #include <freerdp/channels/rdpgfx.h>
 #include <freerdp/gdi/gfx.h>
@@ -856,6 +857,18 @@ crdp_session *crdp_session_create(const crdp_config *config, const crdp_callback
     freerdp_settings_set_bool(settings, FreeRDP_RedirectClipboard, config->share_clipboard);
     freerdp_settings_set_bool(settings, FreeRDP_SupportDisplayControl, config->dynamic_resolution);
     freerdp_settings_set_bool(settings, FreeRDP_DynamicResolutionUpdate, config->dynamic_resolution);
+
+    // Same mapping as xfreerdp's /network; the default keeps FreeRDP's own
+    // experience flags so existing behaviour is unchanged.
+    UINT32 connection_type = 0;
+    switch (config->connection_type) {
+    case CRDP_CONNECTION_LAN: connection_type = CONNECTION_TYPE_LAN; break;
+    case CRDP_CONNECTION_BROADBAND: connection_type = CONNECTION_TYPE_BROADBAND_HIGH; break;
+    case CRDP_CONNECTION_MODEM: connection_type = CONNECTION_TYPE_MODEM; break;
+    case CRDP_CONNECTION_DEFAULT: break;
+    }
+    if (connection_type != 0 && !freerdp_set_connection_type(settings, connection_type))
+        os_log_error(crdp_oslog(), "rdp connection type %u not applied", connection_type);
 
     return session;
 }

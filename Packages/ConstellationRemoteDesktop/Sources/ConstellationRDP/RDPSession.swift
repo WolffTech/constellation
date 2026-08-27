@@ -20,7 +20,7 @@ public final class RDPSession: RemoteDesktopSession {
         didSet { host.displayMode = displayMode }
     }
 
-    private let configuration: RDPSessionConfiguration
+    public let configuration: RDPSessionConfiguration
     private let passwordProvider: RDPPasswordProvider
     private let verifier: RDPCertificateVerifier
     private let host: RDPHostView
@@ -145,7 +145,8 @@ public final class RDPSession: RemoteDesktopSession {
                             height: UInt32(max(1, initial.height)),
                             scale_percent: scalePercent,
                             dynamic_resolution: configuration.dynamicResolution,
-                            share_clipboard: configuration.sharesClipboard)
+                            share_clipboard: configuration.sharesClipboard,
+                            connection_type: configuration.connectionQuality.bridgeValue)
                         var callbacksCopy = callbacks
                         handle = crdp_session_create(&config, &callbacksCopy)
                     }
@@ -309,6 +310,17 @@ public final class RDPSession: RemoteDesktopSession {
             return RemoteDesktopSessionFailure(message: connectFailureMessage)
         default:
             return RemoteDesktopSessionFailure(message: genericFailureMessage)
+        }
+    }
+}
+
+private extension RDPConnectionQuality {
+    var bridgeValue: crdp_connection_type {
+        switch self {
+        case .automatic: CRDP_CONNECTION_DEFAULT
+        case .lan: CRDP_CONNECTION_LAN
+        case .broadband: CRDP_CONNECTION_BROADBAND
+        case .modem: CRDP_CONNECTION_MODEM
         }
     }
 }

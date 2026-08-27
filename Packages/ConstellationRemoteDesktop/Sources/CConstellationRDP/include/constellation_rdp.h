@@ -43,6 +43,16 @@ typedef enum {
     CRDP_CERT_ACCEPT_ONCE = 2,
 } crdp_cert_verdict;
 
+/// Network profile FreeRDP tunes its experience flags (wallpaper, font
+/// smoothing, animations) and codecs for. `CRDP_CONNECTION_DEFAULT` leaves
+/// FreeRDP's own defaults untouched.
+typedef enum {
+    CRDP_CONNECTION_DEFAULT = 0,
+    CRDP_CONNECTION_LAN,
+    CRDP_CONNECTION_BROADBAND,
+    CRDP_CONNECTION_MODEM,
+} crdp_connection_type;
+
 typedef struct {
     const char *host;
     uint32_t port; // 0 means the RDP default, 3389
@@ -56,6 +66,7 @@ typedef struct {
     uint32_t scale_percent;
     bool dynamic_resolution; // negotiate the Display Control channel
     bool share_clipboard;
+    crdp_connection_type connection_type;
 } crdp_config;
 
 /// A certificate awaiting a verdict. Pointers are valid only for the duration

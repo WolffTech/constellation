@@ -10,16 +10,20 @@ struct ConstellationApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var root = CompositionRoot()
 
+    /// Menu shortcuts follow the Settings › Shortcuts assignments.
+    private var shortcuts: ShortcutSettingsStore { root.shortcuts }
+
     var body: some Scene {
         WindowGroup {
             ContentView(root: root)
+                .environment(root.shortcuts)
                 .onAppear { appDelegate.root = root }
         }
         .defaultSize(width: 1100, height: 700)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Machine") { root.ui.editor = .new }
-                    .keyboardShortcut("n")
+                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .newMachine))
             }
             // Replaces File › Close: AppKit dispatches ⌘W to the first enabled
             // menu item, so the window's own Close would otherwise win.
@@ -27,20 +31,22 @@ struct ConstellationApp: App {
                 Button("Close Session") {
                     if let id = root.sessions?.selectedSessionID { root.sessions?.requestClose(sessionID: id) }
                 }
-                .keyboardShortcut("w")
+                .keyboardShortcut(shortcuts.keyboardShortcut(for: .closeSession))
                 .disabled(root.sessions?.selectedSessionID == nil)
                 Button("Close Other Sessions") {
                     if let id = root.sessions?.selectedSessionID { root.sessions?.requestCloseOthers(keeping: id) }
                 }
-                .keyboardShortcut("w", modifiers: [.command, .option])
+                .keyboardShortcut(shortcuts.keyboardShortcut(for: .closeOtherSessions))
                 .disabled((root.sessions?.sessions.count ?? 0) < 2)
                 Button("Close Window") { NSApplication.shared.keyWindow?.performClose(nil) }
-                    .keyboardShortcut("w", modifiers: [.command, .shift])
+                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .closeWindow))
             }
             CommandGroup(after: .toolbar) {
                 Button("Fit to Window") { root.setDisplayMode(.fit) }
+                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .fitToWindow))
                     .disabled(!root.selectedSessionIsRemoteDesktop)
                 Button("Actual Size") { root.setDisplayMode(.actualSize) }
+                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .actualSize))
                     .disabled(!root.selectedSessionIsRemoteDesktop)
                 Divider()
             }
@@ -50,17 +56,18 @@ struct ConstellationApp: App {
             }
             CommandMenu("Session") {
                 Button("Quick Connect…") { root.ui.showsQuickConnect = true }
-                    .keyboardShortcut("k")
+                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .quickConnect))
                 Button("Connect Default Profile") { root.openDefaultProfile() }
-                    .keyboardShortcut("t")
+                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .connectDefaultProfile))
                     .disabled(root.ui.selectedMachineID == nil)
                 Divider()
                 Button("Reconnect") { root.reconnectSelectedSession() }
-                    .keyboardShortcut("r")
+                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .reconnect))
                     .disabled(root.sessions?.selectedSession?.state.hasLiveProcess != false)
                 Button("Disconnect") {
                     if let id = root.sessions?.selectedSessionID { root.sessions?.disconnect(sessionID: id) }
                 }
+                .keyboardShortcut(shortcuts.keyboardShortcut(for: .disconnect))
                 .disabled(root.sessions?.selectedSession?.state.hasLiveProcess != true)
                 Divider()
                 ForEach(1...9, id: \.self) { number in
@@ -69,12 +76,12 @@ struct ConstellationApp: App {
                         .disabled(root.sessions?.sessions.indices.contains(number - 1) != true)
                 }
                 Button("Next Tab") { root.sessions?.cycleSelection() }
-                    .keyboardShortcut(.tab, modifiers: .control)
+                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .nextTab))
                 Button("Previous Tab") { root.sessions?.cycleSelection(reverse: true) }
-                    .keyboardShortcut(.tab, modifiers: [.control, .shift])
+                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .previousTab))
                 Divider()
                 Button("Find in Session") { root.sessions?.performSearch() }
-                    .keyboardShortcut("f")
+                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .findInSession))
                     .disabled(root.sessions?.selectedSessionID == nil)
             }
             CommandGroup(after: .help) {

@@ -17,7 +17,7 @@ public final class RoyalVNCSession: RemoteDesktopSession {
         didSet { host.displayMode = displayMode }
     }
 
-    private let configuration: VNCSessionConfiguration
+    public let configuration: VNCSessionConfiguration
     private let credentials: VNCCredentialProvider
     private let host: RemoteDesktopHostView
     private var connection: VNCConnection?
@@ -34,19 +34,7 @@ public final class RoyalVNCSession: RemoteDesktopSession {
     public func connect() {
         guard !state.isLive else { return }
         tearDownConnection()
-        let settings = VNCConnection.Settings(
-            isDebugLoggingEnabled: false,
-            hostname: configuration.host,
-            port: UInt16(clamping: configuration.port),
-            isShared: true,
-            isScalingEnabled: true,
-            useDisplayLink: true,
-            // App shortcuts stay local; everything else reaches the remote desktop.
-            inputMode: .forwardKeyboardShortcutsIfNotInUseLocally,
-            isClipboardRedirectionEnabled: configuration.sharesClipboard,
-            colorDepth: .depth24Bit,
-            frameEncodings: .default)
-        let connection = VNCConnection(settings: settings)
+        let connection = VNCConnection(settings: Self.connectionSettings(for: configuration))
         let bridge = DelegateBridge(session: self)
         connection.delegate = bridge
         self.connection = connection
@@ -112,6 +100,30 @@ public final class RoyalVNCSession: RemoteDesktopSession {
     }
 
     // MARK: Helpers
+
+    static func connectionSettings(for configuration: VNCSessionConfiguration) -> VNCConnection.Settings {
+        let inputMode: VNCConnection.Settings.InputMode = switch configuration.keyboardMode {
+        case .local: .none
+        case .forwardUnusedShortcuts: .forwardKeyboardShortcutsIfNotInUseLocally
+        case .forwardAllShortcuts: .forwardKeyboardShortcutsEvenIfInUseLocally
+        }
+        let colorDepth: VNCConnection.Settings.ColorDepth = switch configuration.colorDepth {
+        case .bits8: .depth8Bit
+        case .bits16: .depth16Bit
+        case .bits24: .depth24Bit
+        }
+        return VNCConnection.Settings(
+            isDebugLoggingEnabled: false,
+            hostname: configuration.host,
+            port: UInt16(clamping: configuration.port),
+            isShared: configuration.sharesSession,
+            isScalingEnabled: true,
+            useDisplayLink: true,
+            inputMode: inputMode,
+            isClipboardRedirectionEnabled: configuration.sharesClipboard,
+            colorDepth: colorDepth,
+            frameEncodings: .default)
+    }
 
     private func transition(to newState: RemoteDesktopSessionState) {
         guard newState != state else { return }

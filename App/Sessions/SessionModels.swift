@@ -99,8 +99,9 @@ struct SessionSummary: Identifiable, Equatable, Sendable {
     var state: SessionState
     /// The address the last attempt resolved to; also feeds the Screen Sharing handoff.
     var endpoint: SessionEndpoint?
-    /// Remote desktop sessions only.
-    var displayMode: RemoteDesktopDisplayMode = .fit
+    /// Remote desktop sessions only. `nil` until a session starts (the driver
+    /// picks the default) or the user chooses one; a choice outlives reconnects.
+    var displayMode: RemoteDesktopDisplayMode?
 
     var machineID: MachineID? {
         guard case .saved(let machineID, _) = target else { return nil }

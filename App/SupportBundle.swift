@@ -61,7 +61,8 @@ struct SupportBundle {
             parts.append("(\(kind(of: failure)))")
         }
         if session.protocolKind != .ssh {
-            parts.append(session.displayMode == .fit ? "fit" : "actual size")
+            // Not yet chosen reads as the picker shows it: fit.
+            parts.append((session.displayMode ?? .fit) == .fit ? "fit" : "actual size")
         }
         return parts.joined(separator: " ")
     }

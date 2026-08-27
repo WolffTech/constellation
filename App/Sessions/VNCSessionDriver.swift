@@ -24,26 +24,33 @@ protocol VNCSessionDriving: AnyObject {
 
 /// Starts RoyalVNCKit sessions. The stored password is offered first; the
 /// user is asked only when there is none or the server also wants a username
-/// the profile lacks.
+/// the profile lacks. App-wide VNC settings are read as each session starts.
 @MainActor
 final class RoyalVNCSessionDriver: VNCSessionDriving {
     private let vault: any CredentialVault
+    private let settings: @MainActor () -> VNCSettings
     private let prompt: @MainActor (VNCCredentialPrompt) -> VNCSessionCredential?
 
     init(
         vault: any CredentialVault,
+        settings: @escaping @MainActor () -> VNCSettings = { .default },
         prompt: @escaping @MainActor (VNCCredentialPrompt) -> VNCSessionCredential? = VNCCredentialPrompter.ask
     ) {
         self.vault = vault
+        self.settings = settings
         self.prompt = prompt
     }
 
     func start(_ request: VNCSessionRequest) throws -> any RemoteDesktopSession {
+        let settings = settings()
         let configuration = VNCSessionConfiguration(
             host: request.host,
             port: request.port,
             username: request.username,
-            sharesClipboard: request.sharesClipboard)
+            sharesClipboard: request.sharesClipboard,
+            colorDepth: settings.colorDepth,
+            sharesSession: settings.sharesSession,
+            keyboardMode: settings.keyboardMode)
         let vault = self.vault
         let prompt = self.prompt
         let session = RoyalVNCSession(configuration: configuration) { kind in
@@ -62,6 +69,7 @@ final class RoyalVNCSessionDriver: VNCSessionDriving {
                 username: request.username,
                 hasStoredPassword: stored != nil))
         }
+        session.displayMode = settings.defaultDisplayMode
         return session
     }
 }

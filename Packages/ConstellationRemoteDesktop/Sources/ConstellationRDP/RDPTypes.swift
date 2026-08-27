@@ -21,6 +21,7 @@ public struct RDPSessionConfiguration: Sendable, Equatable {
     /// Mirrors text between the local pasteboard and the remote clipboard,
     /// both ways. Files and images are not shared.
     public var sharesClipboard: Bool
+    public var connectionQuality: RDPConnectionQuality
 
     public init(
         host: String,
@@ -30,7 +31,8 @@ public struct RDPSessionConfiguration: Sendable, Equatable {
         width: Int = 1280,
         height: Int = 800,
         dynamicResolution: Bool = true,
-        sharesClipboard: Bool = false
+        sharesClipboard: Bool = false,
+        connectionQuality: RDPConnectionQuality = .automatic
     ) {
         self.host = host
         self.port = port
@@ -40,7 +42,18 @@ public struct RDPSessionConfiguration: Sendable, Equatable {
         self.height = height
         self.dynamicResolution = dynamicResolution
         self.sharesClipboard = sharesClipboard
+        self.connectionQuality = connectionQuality
     }
+}
+
+/// The network profile Windows tunes its desktop experience for (wallpaper,
+/// font smoothing, animations, themes). `automatic` leaves FreeRDP's defaults
+/// in place; the others match xfreerdp's `/network` presets.
+public enum RDPConnectionQuality: String, Sendable, Codable, CaseIterable {
+    case automatic
+    case lan
+    case broadband
+    case modem
 }
 
 /// Resolves the account password (from Keychain in the app). Returning `nil`

@@ -521,9 +521,12 @@ final class SessionCoordinator {
         do {
             let session = try make()
             guard attempts[sessionID] == attempt,
-                  sessions.contains(where: { $0.id == sessionID }) else { return }
-            let mode = sessions.first(where: { $0.id == sessionID })?.displayMode ?? .fit
-            session.displayMode = mode
+                  let summary = sessions.first(where: { $0.id == sessionID }) else { return }
+            if let mode = summary.displayMode {
+                session.displayMode = mode
+            } else {
+                update(sessionID) { $0.displayMode = session.displayMode }
+            }
             handles[sessionID] = .remoteDesktop(session)
             let facts = ConnectionFacts(host: host, port: port, connectedAt: Date())
             session.eventHandler = { [weak self] event in

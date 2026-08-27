@@ -25,22 +25,26 @@ protocol RDPSessionDriving: AnyObject {
 
 /// Starts FreeRDP sessions. NLA needs the account and password before the
 /// connection opens, so anything the profile and vault cannot supply is asked
-/// for up front; certificates are confirmed while FreeRDP waits.
+/// for up front; certificates are confirmed while FreeRDP waits. App-wide RDP
+/// settings are read as each session starts.
 @MainActor
 final class FreeRDPSessionDriver: RDPSessionDriving {
     private let vault: any CredentialVault
     private let trustStore: any TrustStore
+    private let settings: @MainActor () -> RDPSettings
     private let credentialPrompt: @MainActor (RDPCredentialPrompt) -> RDPCredentialEntry?
     private let certificatePrompt: @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision
 
     init(
         vault: any CredentialVault,
         trustStore: any TrustStore,
+        settings: @escaping @MainActor () -> RDPSettings = { .default },
         credentialPrompt: @escaping @MainActor (RDPCredentialPrompt) -> RDPCredentialEntry? = RDPCredentialPrompter.ask,
         certificatePrompt: @escaping @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision = RDPCertificatePrompter.ask
     ) {
         self.vault = vault
         self.trustStore = trustStore
+        self.settings = settings
         self.credentialPrompt = credentialPrompt
         self.certificatePrompt = certificatePrompt
     }
@@ -62,21 +66,28 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
             if let entered = entry.password { password = entered }
         }
 
+        let settings = settings()
         let configuration = RDPSessionConfiguration(
             host: request.host,
             port: request.port,
             username: username,
             domain: domain.isEmpty ? nil : domain,
-            sharesClipboard: request.sharesClipboard)
+            width: settings.desktopWidth,
+            height: settings.desktopHeight,
+            dynamicResolution: settings.dynamicResolution,
+            sharesClipboard: request.sharesClipboard,
+            connectionQuality: settings.connectionQuality)
         let certificatePrompt = self.certificatePrompt
         let trustStore = self.trustStore
         let machineName = request.machineName
-        return RDPSession(
+        let session = RDPSession(
             configuration: configuration,
             password: { password },
             verifyCertificate: { certificate in
                 await resolveCertificate(certificate, machineName: machineName, trustStore: trustStore, prompt: certificatePrompt)
             })
+        session.displayMode = settings.defaultDisplayMode
+        return session
     }
 }
 
