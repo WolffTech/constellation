@@ -15,6 +15,7 @@ struct MachineSidebar: View {
     let sessions: SessionCoordinator
     let ui: UIState
     let expansion: SidebarExpansionStore
+    let trustedCertificates: TrustedCertificatesModel
     @Binding var searchText: String
     let onDelete: (Machine) -> Void
 
@@ -154,6 +155,10 @@ struct MachineSidebar: View {
         .contextMenu {
             Button("Connect") { connect(profileID: profile.id) }
             Button("Edit Machine…") { ui.editor = .edit(machine.id) }
+            if case .rdp(let rdp) = profile {
+                Divider()
+                Button("Forget Trusted Certificate") { forgetCertificate(for: rdp, of: machine) }
+            }
         }
         .tag(SidebarItem.profile(profile.id))
     }
@@ -183,6 +188,13 @@ struct MachineSidebar: View {
         if let port = profile.port, port != profile.protocolKind.defaultPort { parts.append("port \(port)") }
         if machine.defaultProfileID == profile.id { parts.append("default") }
         return parts.joined(separator: " · ")
+    }
+
+    /// Revokes Always Trust for the RDP server, so the next connection prompts
+    /// again. The profile may reach the machine through any of its addresses.
+    private func forgetCertificate(for rdp: RDPProfile, of machine: Machine) {
+        let hosts = store.snapshot.addresses(for: machine.id).map(\.host)
+        Task { await trustedCertificates.forget(hosts: hosts, port: rdp.port) }
     }
 
     private func connect(profileID: ProfileID) {

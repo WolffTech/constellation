@@ -42,6 +42,13 @@ public final class GRDBTrustStore: TrustStore, Sendable {
                 t.primaryKey(["host", "port"])
             }
         }
+        // Unix seconds as REAL so a Date round-trips exactly. Rows from v1
+        // have no date and stay NULL.
+        migrator.registerMigration("v2") { db in
+            try db.alter(table: "trusted_certificates") { t in
+                t.add(column: "trusted_at", .double)
+            }
+        }
         return migrator
     }
 
@@ -59,17 +66,19 @@ public final class GRDBTrustStore: TrustStore, Sendable {
     public func trust(_ certificate: TrustedCertificate) async throws {
         try await dbQueue.write { db in
             try db.execute(sql: """
-                INSERT INTO trusted_certificates (host, port, fingerprint, subject, issuer, common_name)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO trusted_certificates (host, port, fingerprint, subject, issuer, common_name, trusted_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(host, port) DO UPDATE SET
                     fingerprint = excluded.fingerprint,
                     subject = excluded.subject,
                     issuer = excluded.issuer,
-                    common_name = excluded.common_name
+                    common_name = excluded.common_name,
+                    trusted_at = excluded.trusted_at
                 """,
                 arguments: [
                     certificate.host, certificate.port, certificate.fingerprint,
                     certificate.subject, certificate.issuer, certificate.commonName,
+                    certificate.trustedAt?.timeIntervalSince1970,
                 ])
         }
     }
@@ -95,6 +104,7 @@ public final class GRDBTrustStore: TrustStore, Sendable {
             fingerprint: row["fingerprint"],
             subject: row["subject"],
             issuer: row["issuer"],
-            commonName: row["common_name"])
+            commonName: row["common_name"],
+            trustedAt: (row["trusted_at"] as Double?).map(Date.init(timeIntervalSince1970:)))
     }
 }

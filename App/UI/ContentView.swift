@@ -8,8 +8,9 @@ struct ContentView: View {
     let root: CompositionRoot
 
     var body: some View {
-        if let store = root.store, let sessions = root.sessions {
-            MainSplitView(store: store, sessions: sessions, ui: root.ui, expansion: root.sidebarExpansion)
+        if let store = root.store, let sessions = root.sessions, let trustedCertificates = root.trustedCertificates {
+            MainSplitView(store: store, sessions: sessions, ui: root.ui, expansion: root.sidebarExpansion,
+                          trustedCertificates: trustedCertificates)
         } else {
             ContentUnavailableView(
                 "Constellation could not start",
@@ -24,6 +25,7 @@ struct MainSplitView: View {
     let sessions: SessionCoordinator
     let ui: UIState
     let expansion: SidebarExpansionStore
+    let trustedCertificates: TrustedCertificatesModel
 
     @State private var searchText = ""
     @State private var pendingDelete: Machine?
@@ -31,7 +33,8 @@ struct MainSplitView: View {
 
     var body: some View {
         NavigationSplitView {
-            MachineSidebar(store: store, sessions: sessions, ui: ui, expansion: expansion, searchText: $searchText) { pendingDelete = $0 }
+            MachineSidebar(store: store, sessions: sessions, ui: ui, expansion: expansion,
+                           trustedCertificates: trustedCertificates, searchText: $searchText) { pendingDelete = $0 }
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
         } detail: {
             WorkspaceDetailView(store: store, sessions: sessions, ui: ui)

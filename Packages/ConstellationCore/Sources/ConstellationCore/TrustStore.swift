@@ -7,7 +7,7 @@ import Foundation
 /// Trust-on-first-use for VNC and RDP: the app remembers the accepted
 /// fingerprint so a known server connects without prompting, and warns when a
 /// server later presents a different one.
-public struct TrustedCertificate: Hashable, Sendable, Codable {
+public struct TrustedCertificate: Hashable, Sendable, Codable, Identifiable {
     public var host: String
     public var port: Int
     /// SHA-256 fingerprint as the protocol adapter reports it. Compare with
@@ -16,15 +16,26 @@ public struct TrustedCertificate: Hashable, Sendable, Codable {
     public var subject: String
     public var issuer: String
     public var commonName: String
+    /// When the user chose Always Trust. `nil` for decisions recorded before
+    /// the app kept the date.
+    public var trustedAt: Date?
 
-    public init(host: String, port: Int, fingerprint: String, subject: String, issuer: String, commonName: String) {
+    public init(
+        host: String, port: Int, fingerprint: String,
+        subject: String, issuer: String, commonName: String,
+        trustedAt: Date? = nil
+    ) {
         self.host = host
         self.port = port
         self.fingerprint = fingerprint
         self.subject = subject
         self.issuer = issuer
         self.commonName = commonName
+        self.trustedAt = trustedAt
     }
+
+    /// One decision per server, so the address is the identity.
+    public var id: String { "\(host):\(port)" }
 
     /// True when `fingerprint` is the same certificate ignoring separators and
     /// case (adapters vary between `AA:BB` and `aabb`).
@@ -46,7 +57,7 @@ public protocol TrustStore: Sendable {
     func trust(_ certificate: TrustedCertificate) async throws
     /// Drops any recorded decision for a server.
     func forget(host: String, port: Int) async throws
-    /// Every recorded decision, for a management view.
+    /// Every recorded decision ordered by host then port, for a management view.
     func all() async throws -> [TrustedCertificate]
 }
 
@@ -70,6 +81,6 @@ public actor InMemoryTrustStore: TrustStore {
     }
 
     public func all() async throws -> [TrustedCertificate] {
-        Array(entries.values)
+        entries.values.sorted { ($0.host, $0.port) < ($1.host, $1.port) }
     }
 }

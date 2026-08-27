@@ -62,7 +62,6 @@ struct TerminalSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460)
         .task {
             fonts = TerminalCatalogs.monospacedFontFamilies()
             themes = TerminalCatalogs.themes()

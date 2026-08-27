@@ -89,7 +89,7 @@ struct ConstellationApp: App {
         .defaultSize(width: 760, height: 520)
 
         Settings {
-            TerminalSettingsView(settings: root.terminalSettings)
+            SettingsView(root: root)
         }
     }
 }

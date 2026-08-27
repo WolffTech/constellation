@@ -3,6 +3,7 @@
 
 import ConstellationCore
 import ConstellationRDP
+import Foundation
 import Testing
 @testable import Constellation
 
@@ -54,6 +55,25 @@ struct RDPTrustTests {
         let verdict = await resolveCertificate(cert(), machineName: "win11", trustStore: store, prompt: prompt.ask)
         #expect(verdict == .acceptOnce)
         #expect(try await store.trusted(host: "win11", port: 3389)?.fingerprint == "AA:BB:CC")
+    }
+
+    @Test func forgettingAServerPromptsAsFirstUseAgain() async throws {
+        let store = InMemoryTrustStore()
+        try await store.trust(TrustedCertificate(host: "win11", port: 3389, fingerprint: "AA:BB:CC", subject: "", issuer: "", commonName: ""))
+        try await store.forget(host: "win11", port: 3389)
+        let prompt = Prompt(.connectOnce)
+        let verdict = await resolveCertificate(cert(), machineName: "win11", trustStore: store, prompt: prompt.ask)
+        #expect(verdict == .acceptOnce)
+        #expect(prompt.calls.count == 1)
+        #expect(prompt.calls.first?.1 == false, "a forgotten server is not a changed one")
+    }
+
+    @Test func alwaysTrustRecordsWhenTheDecisionWasMade() async throws {
+        let store = InMemoryTrustStore()
+        let before = Date()
+        _ = await resolveCertificate(cert(), machineName: "win11", trustStore: store, prompt: Prompt(.trustAlways).ask)
+        let trustedAt = try #require(try await store.trusted(host: "win11", port: 3389)?.trustedAt)
+        #expect(trustedAt >= before && trustedAt <= Date())
     }
 
     @Test func differentStoredFingerprintPromptsAsChanged() async throws {

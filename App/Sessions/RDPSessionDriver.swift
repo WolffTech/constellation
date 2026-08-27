@@ -111,7 +111,8 @@ func resolveCertificate(
             fingerprint: certificate.fingerprint,
             subject: certificate.subject,
             issuer: certificate.issuer,
-            commonName: certificate.commonName))
+            commonName: certificate.commonName,
+            trustedAt: Date()))
         return .acceptOnce
     }
 }
@@ -221,13 +222,14 @@ enum RDPCertificatePrompter {
         }
         if changed {
             lines.append("")
-            lines.append("A different certificate was trusted before. Continue only if you expected the server to change.")
+            lines.append("A different certificate was trusted before. Continue only if you expected the server to change, such as after a reinstall.")
+            lines.append("Trusted certificates can be reviewed in Settings › Certificates.")
         }
         alert.informativeText = lines.joined(separator: "\n")
         // Connect Once is the default; Always Trust must be a deliberate choice,
         // especially when the certificate has changed.
         alert.addButton(withTitle: "Connect Once")
-        alert.addButton(withTitle: "Always Trust")
+        alert.addButton(withTitle: changed ? "Replace and Always Trust" : "Always Trust")
         alert.addButton(withTitle: "Cancel")
         switch alert.runModal() {
         case .alertFirstButtonReturn: return .connectOnce

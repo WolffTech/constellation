@@ -18,6 +18,7 @@ final class CompositionRoot {
     private(set) var store: MachineStore?
     private(set) var sessions: SessionCoordinator?
     private(set) var startupError: String?
+    private(set) var trustedCertificates: TrustedCertificatesModel?
     let ui = UIState()
     let terminalSettings: TerminalSettingsStore
     let sidebarExpansion: SidebarExpansionStore
@@ -34,6 +35,7 @@ final class CompositionRoot {
             let trustStore = try GRDBTrustStore(path: Self.trustStorePath())
             let store = MachineStore(library: library, vault: vault)
             self.store = store
+            trustedCertificates = TrustedCertificatesModel(store: trustStore)
 
             let runtime = try GhosttyRuntime(appearance: terminalSettings.appearance)
             self.runtime = runtime

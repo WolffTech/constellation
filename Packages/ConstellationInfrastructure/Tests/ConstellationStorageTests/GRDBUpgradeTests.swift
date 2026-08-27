@@ -32,6 +32,27 @@ struct GRDBUpgradeTests {
         #expect(FileManager.default.fileExists(atPath: path))
     }
 
+    @Test func upgradesATrustStoreFromSchemaV1() async throws {
+        let path = temporaryPath("trust.sqlite")
+        do {
+            try FileManager.default.createDirectory(
+                at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true)
+            let v1 = try DatabaseQueue(path: path)
+            try await GRDBTrustStore.migrator.migrate(v1, upTo: "v1")
+            try await v1.write { db in
+                try db.execute(
+                    sql: "INSERT INTO trusted_certificates (host, port, fingerprint, subject, issuer, common_name) VALUES (?, ?, ?, ?, ?, ?)",
+                    arguments: ["win11", 3389, "AA:BB", "CN=win11", "CN=win11", "win11"])
+            }
+        }
+
+        let store = try GRDBTrustStore(path: path)
+        let all = try await store.all()
+        #expect(all.count == 1)
+        #expect(all.first?.fingerprint == "AA:BB")
+        #expect(all.first?.trustedAt == nil, "v1 rows have no trust date")
+    }
+
     @Test func upgradesALibraryFromSchemaV1() async throws {
         let path = temporaryPath("library.sqlite")
         let machine = Machine(name: "alpha", notes: "", tags: ["homelab"], isFavorite: true)

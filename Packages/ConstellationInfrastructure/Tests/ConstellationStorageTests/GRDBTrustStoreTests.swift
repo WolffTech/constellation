@@ -34,6 +34,22 @@ struct GRDBTrustStoreTests {
         #expect(try await store.trusted(host: "win11", port: 3389) == nil)
     }
 
+    @Test func keepsTheTrustDateExactly() async throws {
+        let store = try GRDBTrustStore.inMemory()
+        var certificate = cert()
+        certificate.trustedAt = Date(timeIntervalSince1970: 1_756_200_000.123456)
+        try await store.trust(certificate)
+        #expect(try await store.trusted(host: "win11", port: 3389) == certificate)
+    }
+
+    @Test func listsEveryServerOrderedByAddress() async throws {
+        let store = try GRDBTrustStore.inMemory()
+        try await store.trust(cert(host: "win11", port: 3390))
+        try await store.trust(cert(host: "dc01"))
+        try await store.trust(cert(host: "win11", port: 3389))
+        #expect(try await store.all().map(\.id) == ["dc01:3389", "win11:3389", "win11:3390"])
+    }
+
     @Test func matchesIgnoresSeparatorsAndCase() {
         let certificate = cert(fingerprint: "AA:BB:CC")
         #expect(certificate.matches(fingerprint: "aabbcc"))
