@@ -16,20 +16,20 @@ struct SettingsView: View {
             TerminalSettingsView(settings: root.terminalSettings)
                 .frame(width: Self.tabSize.width, height: Self.tabSize.height)
                 .tabItem { Label("Terminal", systemImage: "terminal") }
-            ShortcutSettingsView(shortcuts: root.shortcuts)
-                .frame(width: Self.tabSize.width, height: Self.tabSize.height)
-                .tabItem { Label("Shortcuts", systemImage: "keyboard") }
-            VNCSettingsView(settings: root.vncSettings)
-                .frame(width: Self.tabSize.width, height: Self.tabSize.height)
-                .tabItem { Label("VNC", systemImage: ConnectionProtocol.vnc.symbolName) }
             RDPSettingsView(settings: root.rdpSettings)
                 .frame(width: Self.tabSize.width, height: Self.tabSize.height)
                 .tabItem { Label("RDP", systemImage: ConnectionProtocol.rdp.symbolName) }
+            VNCSettingsView(settings: root.vncSettings)
+                .frame(width: Self.tabSize.width, height: Self.tabSize.height)
+                .tabItem { Label("VNC", systemImage: ConnectionProtocol.vnc.symbolName) }
             if let trustedCertificates = root.trustedCertificates {
                 TrustedCertificatesView(model: trustedCertificates)
                     .frame(width: Self.tabSize.width, height: Self.tabSize.height)
                     .tabItem { Label("Certificates", systemImage: "checkmark.shield") }
             }
+            ShortcutSettingsView(shortcuts: root.shortcuts)
+                .frame(width: Self.tabSize.width, height: Self.tabSize.height)
+                .tabItem { Label("Shortcuts", systemImage: "keyboard") }
             UpdatesSettingsView()
                 .frame(width: Self.tabSize.width, height: Self.tabSize.height)
                 .tabItem { Label("Updates", systemImage: "arrow.down.circle") }
