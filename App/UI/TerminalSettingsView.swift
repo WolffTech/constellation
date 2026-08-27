@@ -10,49 +10,68 @@ struct TerminalSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Font") {
-                Picker("Family", selection: fontFamily) {
-                    Text("Ghostty default").tag(String?.none)
-                    Divider()
-                    ForEach(fontChoices, id: \.self) { Text($0).tag(String?.some($0)) }
-                }
-                LabeledContent("Size") {
-                    HStack(spacing: 4) {
-                        TextField("Size", value: fontSize, format: .number)
-                            .labelsHidden()
-                            .frame(width: 50)
-                        Stepper("Size", value: fontSize, in: 8...32, step: 0.5)
-                            .labelsHidden()
-                        Text("pt").foregroundStyle(.secondary)
+            Section {
+                Toggle("Use my Ghostty configuration", isOn: Binding(
+                    get: { settings.appearance.usesGhosttyConfig },
+                    set: { value in settings.update { $0.usesGhosttyConfig = value } }))
+                if !settings.diagnostics.isEmpty {
+                    ForEach(settings.diagnostics, id: \.self) { message in
+                        Label(message, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
                     }
                 }
+            } footer: {
+                Text("Reads the config files Ghostty itself uses for font, colors, padding, scrollback and Option handling. Constellation keeps its own shortcuts and terminal type.")
             }
 
-            Section("Colors") {
-                if themes.isEmpty {
-                    TextField("Theme", text: themeText, prompt: Text("Ghostty theme name"))
-                } else {
-                    Picker("Theme", selection: theme) {
+            Group {
+                Section("Font") {
+                    Picker("Family", selection: fontFamily) {
                         Text("Ghostty default").tag(String?.none)
                         Divider()
-                        ForEach(themeChoices, id: \.self) { Text($0).tag(String?.some($0)) }
+                        ForEach(fontChoices, id: \.self) { Text($0).tag(String?.some($0)) }
+                    }
+                    LabeledContent("Size") {
+                        HStack(spacing: 4) {
+                            TextField("Size", value: fontSize, format: .number)
+                                .labelsHidden()
+                                .frame(width: 50)
+                            Stepper("Size", value: fontSize, in: 8...32, step: 0.5)
+                                .labelsHidden()
+                            Text("pt").foregroundStyle(.secondary)
+                        }
                     }
                 }
-            }
 
-            Section("Behavior") {
-                Picker("Scrollback", selection: Binding(
-                    get: { settings.appearance.scrollbackLimitBytes },
-                    set: { value in settings.update { $0.scrollbackLimitBytes = value } })) {
-                    Text("1 MB").tag(1_000_000)
-                    Text("10 MB").tag(10_000_000)
-                    Text("50 MB").tag(50_000_000)
-                    Text("100 MB").tag(100_000_000)
+                Section("Colors") {
+                    if themes.isEmpty {
+                        TextField("Theme", text: themeText, prompt: Text("Ghostty theme name"))
+                    } else {
+                        Picker("Theme", selection: theme) {
+                            Text("Ghostty default").tag(String?.none)
+                            Divider()
+                            ForEach(themeChoices, id: \.self) { Text($0).tag(String?.some($0)) }
+                        }
+                    }
                 }
-                Toggle("Use Option as Alt", isOn: Binding(
-                    get: { settings.appearance.optionAsAlt },
-                    set: { value in settings.update { $0.optionAsAlt = value } }))
+
+                Section("Behavior") {
+                    Picker("Scrollback", selection: Binding(
+                        get: { settings.appearance.scrollbackLimitBytes },
+                        set: { value in settings.update { $0.scrollbackLimitBytes = value } })) {
+                        Text("1 MB").tag(1_000_000)
+                        Text("10 MB").tag(10_000_000)
+                        Text("50 MB").tag(50_000_000)
+                        Text("100 MB").tag(100_000_000)
+                    }
+                    Toggle("Use Option as Alt", isOn: Binding(
+                        get: { settings.appearance.optionAsAlt },
+                        set: { value in settings.update { $0.optionAsAlt = value } }))
+                }
             }
+            // Ignored while the user's Ghostty config decides them.
+            .disabled(settings.appearance.usesGhosttyConfig)
 
             Section {
                 HStack {

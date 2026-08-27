@@ -14,7 +14,7 @@ struct TerminalSettingsStoreTests {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = TerminalSettingsStore(defaults: defaults)
         var applied: [TerminalAppearance] = []
-        store.applyAppearance = { applied.append($0) }
+        store.applyAppearance = { applied.append($0); return [] }
 
         store.update {
             $0.fontFamily = "JetBrains Mono"
@@ -39,6 +39,21 @@ struct TerminalSettingsStoreTests {
         #expect(store.appearance == .default)
         #expect(store.presentedError != nil)
         #expect(TerminalSettingsStore(defaults: defaults).appearance == .default)
+    }
+
+    @Test func keepsDiagnosticsOfTheAppliedConfiguration() throws {
+        let suiteName = "TerminalSettingsStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = TerminalSettingsStore(defaults: defaults)
+        store.applyAppearance = { $0.usesGhosttyConfig ? ["unknown field: foo"] : [] }
+
+        store.update { $0.usesGhosttyConfig = true }
+        #expect(store.diagnostics == ["unknown field: foo"])
+        #expect(TerminalSettingsStore(defaults: defaults).appearance.usesGhosttyConfig)
+
+        store.update { $0.usesGhosttyConfig = false }
+        #expect(store.diagnostics.isEmpty)
     }
 
     private enum TestError: Error { case rejected }

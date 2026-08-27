@@ -39,8 +39,9 @@ final class CompositionRoot {
 
             let runtime = try GhosttyRuntime(appearance: terminalSettings.appearance)
             self.runtime = runtime
+            terminalSettings.diagnostics = runtime.configDiagnostics
             terminalSettings.applyAppearance = { [weak runtime] appearance in
-                try runtime?.updateAppearance(appearance)
+                try runtime?.updateAppearance(appearance) ?? []
             }
             let askPass = try AskPassService(secrets: VaultSecretProvider(vault: vault)) { request in
                 AskPassPrompter.ask(request)

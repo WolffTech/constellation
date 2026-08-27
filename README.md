@@ -25,7 +25,8 @@ passphrases are stored in the macOS Keychain.
 
 - Multiple addresses and connection profiles for each machine
 - SSH tabs with a Metal-rendered terminal, fonts, themes, and your existing
-  OpenSSH configuration, keys, and agent
+  OpenSSH configuration, keys, and agent, optionally styled by your own
+  Ghostty configuration
 - RDP sessions with NLA, HiDPI rendering, shared clipboard text, and a trust
   store for accepted certificates
 - VNC sessions in Constellation or Apple's Screen Sharing app

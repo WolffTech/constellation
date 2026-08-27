@@ -16,9 +16,12 @@ final class TerminalSettingsStore {
         }
     }
     var presentedError: String?
+    /// Warnings from the last applied configuration, shown in Settings so a
+    /// typo in the user's Ghostty config is not silently ignored.
+    var diagnostics: [String] = []
 
     @ObservationIgnored
-    var applyAppearance: (@MainActor (TerminalAppearance) throws -> Void)?
+    var applyAppearance: (@MainActor (TerminalAppearance) throws -> [String])?
 
     @ObservationIgnored
     private let defaults: UserDefaults
@@ -37,7 +40,7 @@ final class TerminalSettingsStore {
         var updated = appearance
         change(&updated)
         do {
-            try applyAppearance?(updated)
+            diagnostics = try applyAppearance?(updated) ?? []
             appearance = updated
             presentedError = nil
         } catch {

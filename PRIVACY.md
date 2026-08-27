@@ -17,7 +17,10 @@ machines you configure. It is made by Wolff.Tech.
 - Terminal appearance settings and window state in the app's preferences.
 
 SSH host keys are handled by the system's OpenSSH and stored in
-`~/.ssh/known_hosts`, as with any ssh client.
+`~/.ssh/known_hosts`, as with any ssh client. If you turn on "Use my Ghostty
+configuration", the app reads the same config files Ghostty does
+(`~/.config/ghostty/` and `~/Library/Application Support/com.mitchellh.ghostty/`)
+and does not write to them.
 
 ## What leaves your Mac
 

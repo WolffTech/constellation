@@ -8,7 +8,10 @@ import os
 /// Owns a `ghostty_config_t` built from a `TerminalAppearance`.
 ///
 /// libghostty only loads configuration from files, so the rendered text is
-/// written to a temporary file, loaded, and deleted.
+/// written to a temporary file, loaded, and deleted. When the appearance opts
+/// in, the user's own Ghostty config files are loaded first; Ghostty applies
+/// keys last-writer-wins, so the generated file still decides everything
+/// Constellation must own.
 @MainActor
 final class GhosttyConfig {
     nonisolated(unsafe) let handle: ghostty_config_t
@@ -31,6 +34,9 @@ final class GhosttyConfig {
         }
         defer { try? FileManager.default.removeItem(at: url) }
 
+        if appearance.usesGhosttyConfig {
+            ghostty_config_load_default_files(handle)
+        }
         ghostty_config_load_file(handle, url.path)
         ghostty_config_finalize(handle)
 
@@ -66,9 +72,6 @@ enum GhosttyConfigText {
             "keybind = super+zero=reset_font_size",
             "keybind = shift+page_up=scroll_page_up",
             "keybind = shift+page_down=scroll_page_down",
-            "font-size = \(formatNumber(appearance.fontSize))",
-            "scrollback-limit = \(appearance.scrollbackLimitBytes)",
-            "macos-option-as-alt = \(appearance.optionAsAlt)",
             // Remote hosts rarely have xterm-ghostty terminfo.
             "term = xterm-256color",
             // Constellation confirms closes and handles exits itself.
@@ -77,17 +80,25 @@ enum GhosttyConfigText {
             "clipboard-write = ask",
             "clipboard-paste-protection = true",
             "shell-integration = none",
-            "window-padding-x = 4",
-            "window-padding-y = 4",
             "auto-update = off",
             "window-save-state = never",
             "quit-after-last-window-closed = false",
         ]
-        if let family = appearance.fontFamily, !family.isEmpty {
-            lines.append("font-family = \(family)")
-        }
-        if let theme = appearance.theme, !theme.isEmpty {
-            lines.append("theme = \(theme)")
+        // Appearance keys are left to the user's Ghostty config when it is in use.
+        if !appearance.usesGhosttyConfig {
+            lines += [
+                "font-size = \(formatNumber(appearance.fontSize))",
+                "scrollback-limit = \(appearance.scrollbackLimitBytes)",
+                "macos-option-as-alt = \(appearance.optionAsAlt)",
+                "window-padding-x = 4",
+                "window-padding-y = 4",
+            ]
+            if let family = appearance.fontFamily, !family.isEmpty {
+                lines.append("font-family = \(family)")
+            }
+            if let theme = appearance.theme, !theme.isEmpty {
+                lines.append("theme = \(theme)")
+            }
         }
         return lines.joined(separator: "\n") + "\n"
     }

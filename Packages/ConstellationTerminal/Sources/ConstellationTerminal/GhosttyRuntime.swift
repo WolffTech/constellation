@@ -9,7 +9,7 @@ import GhosttyKit
 /// named by the callback's userdata.
 @MainActor
 public final class GhosttyRuntime {
-    nonisolated(unsafe) private static var libraryInitialized = false
+    nonisolated(unsafe) private(set) static var libraryInitialized = false
 
     nonisolated(unsafe) private(set) var app: ghostty_app_t?
     private var config: GhosttyConfig
@@ -93,12 +93,19 @@ public final class GhosttyRuntime {
         try GhosttyTerminalSession(runtime: self, command: command)
     }
 
-    /// Applies app-owned settings to existing and future surfaces.
-    public func updateAppearance(_ appearance: TerminalAppearance) throws {
+    /// Warnings libghostty raised while loading the current configuration,
+    /// such as unknown keys in the user's Ghostty config. Empty when clean.
+    public var configDiagnostics: [String] { config.diagnostics }
+
+    /// Applies app-owned settings to existing and future surfaces and returns
+    /// the diagnostics of the new configuration.
+    @discardableResult
+    public func updateAppearance(_ appearance: TerminalAppearance) throws -> [String] {
         let updated = try GhosttyConfig(appearance: appearance)
         guard let app else { throw TerminalError.appCreationFailed }
         ghostty_app_update_config(app, updated.handle)
         config = updated
+        return updated.diagnostics
     }
 
     func tick() {
@@ -116,7 +123,7 @@ public final class GhosttyRuntime {
         ghostty_app_keyboard_changed(app)
     }
 
-    private static func initializeLibrary() throws {
+    static func initializeLibrary() throws {
         guard !libraryInitialized else { return }
         let status = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
         guard status == 0 else { throw TerminalError.libraryInitFailed(status) }
