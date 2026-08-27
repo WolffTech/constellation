@@ -55,7 +55,8 @@ struct RDPProofTests {
             height: 800,
             dynamicResolution: true)
         let session = RDPSession(configuration: configuration, password: { creds.password }, verifyCertificate: { _ in .acceptOnce })
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let initialPointSize = CGSize(width: 1100, height: 700)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: initialPointSize), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.contentView = session.view
         window.layoutIfNeeded()
 
@@ -66,9 +67,14 @@ struct RDPProofTests {
             }
         }
         session.connect()
-        var first: CGSize?
-        for _ in 0..<300 where first == nil { first = latest.value; try? await Task.sleep(for: .milliseconds(100)) }
-        #expect(first != nil, "expected an initial framebuffer")
+        let scale = window.backingScaleFactor
+        let initialTarget = CGSize(width: initialPointSize.width * scale, height: initialPointSize.height * scale)
+        var matchedInitialWindow = false
+        for _ in 0..<300 where !matchedInitialWindow {
+            if latest.value == initialTarget { matchedInitialWindow = true; break }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(matchedInitialWindow, "desktop did not match the window after connecting")
 
         // Shrink the view; the host reports the new fit size and the desktop
         // follows. Re-request periodically: against a single-session host that
@@ -78,7 +84,6 @@ struct RDPProofTests {
         session.view.layoutSubtreeIfNeeded()
         // The desktop is requested in pixels, so expect the point size scaled
         // by the display (2048x1408 on Retina).
-        let scale = window.backingScaleFactor
         let target = CGSize(width: 1024 * scale, height: 704 * scale)
         var resized = false
         for i in 0..<40 where !resized {

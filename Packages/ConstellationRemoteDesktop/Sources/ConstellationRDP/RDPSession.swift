@@ -112,9 +112,11 @@ public final class RDPSession: RemoteDesktopSession {
         request(pixels: pixelSize(for: CGSize(width: max(0, width), height: max(0, height))))
     }
 
-    private func request(pixels: CGSize) {
-        guard let handle, state == .connected else { return }
+    @discardableResult
+    private func request(pixels: CGSize) -> Bool {
+        guard let handle, state == .connected else { return false }
         crdp_session_request_resolution(handle, UInt32(pixels.width), UInt32(pixels.height), scalePercent)
+        return true
     }
 
     // MARK: Session start
@@ -248,8 +250,8 @@ public final class RDPSession: RemoteDesktopSession {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, let self else { return }
             guard self.framebufferSize != target else { return }
+            guard self.request(pixels: target) else { return }
             self.requestedPixelSize = target
-            self.request(pixels: target)
         }
     }
 
