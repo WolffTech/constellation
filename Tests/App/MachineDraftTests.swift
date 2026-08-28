@@ -226,10 +226,13 @@ struct QuickSetupDraftTests {
         var draft = MachineDraft(newMachine: "box")
         draft.quickHost = "box.example.com"
         draft.quickUsername = "nick"
+        draft.quickPassword = "hunter2"
         draft.quickProtocol = .rdp
         #expect(draft.profiles.isEmpty && draft.vncProfiles.isEmpty)
         #expect(draft.rdpProfiles.first?.profile.username == "nick")
         #expect(draft.quickUsername == "nick")
+        #expect(draft.quickPassword == "hunter2")
+        #expect(draft.pendingSecrets.count == 1)
 
         draft.quickProtocol = .vnc
         #expect(draft.rdpProfiles.isEmpty)
@@ -241,5 +244,21 @@ struct QuickSetupDraftTests {
         let profiles = changes.compactMap { if case .upsertProfile(let p) = $0 { p } else { nil } }
         #expect(profiles.count == 1)
         #expect(profiles.first?.protocolKind == .vnc)
+    }
+
+    @Test func sshPasswordSwitchesAuthenticationAndClearingRestoresTheAgent() throws {
+        var draft = MachineDraft(newMachine: "box")
+        draft.quickHost = "box.example.com"
+        draft.quickPassword = "hunter2"
+        #expect(draft.profiles.first?.authMode == .password)
+        #expect(draft.pendingSecrets.count == 1)
+        let saved = try draft.profiles[0].resolvedProfile(machineName: "box")
+        #expect(saved.authentication == .password)
+        #expect(saved.credentialID != nil)
+
+        draft.quickPassword = ""
+        #expect(draft.profiles.first?.authMode == .agent)
+        #expect(draft.pendingSecrets.isEmpty)
+        #expect(try draft.profiles[0].resolvedProfile(machineName: "box").credentialID == nil)
     }
 }

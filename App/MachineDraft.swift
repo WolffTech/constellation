@@ -195,6 +195,7 @@ extension MachineDraft {
         set {
             guard newValue != quickProtocol else { return }
             let username = quickUsername
+            let password = quickPassword
             profiles = []
             vncProfiles = []
             rdpProfiles = []
@@ -206,6 +207,26 @@ extension MachineDraft {
             case .appleScreenSharing: profiles = [SSHProfileDraft(profile: SSHProfile(machineID: machine.id))]
             }
             quickUsername = username
+            quickPassword = password
+        }
+    }
+
+    /// The profile's typed password. For SSH a password switches
+    /// authentication from the agent to password; clearing it switches back.
+    var quickPassword: String {
+        get {
+            profiles.first?.enteredSecret ?? vncProfiles.first?.enteredSecret ?? rdpProfiles.first?.enteredSecret ?? ""
+        }
+        set {
+            let value = newValue.isEmpty ? nil : newValue
+            if !profiles.isEmpty {
+                profiles[0].enteredSecret = value
+                profiles[0].authMode = value == nil ? .agent : .password
+            } else if !vncProfiles.isEmpty {
+                vncProfiles[0].enteredSecret = value
+            } else if !rdpProfiles.isEmpty {
+                rdpProfiles[0].enteredSecret = value
+            }
         }
     }
 

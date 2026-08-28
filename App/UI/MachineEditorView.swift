@@ -56,7 +56,7 @@ struct MachineEditorView: View {
         }
         .frame(
             minWidth: showsAllOptions ? 820 : 520, idealWidth: showsAllOptions ? 860 : 520,
-            minHeight: showsAllOptions ? 540 : 370, idealHeight: showsAllOptions ? 580 : 370)
+            minHeight: showsAllOptions ? 540 : 410, idealHeight: showsAllOptions ? 580 : 410)
         .interactiveDismissDisabled(saving || hasChanges)
         .defaultFocus($nameFocused, true)
         .onAppear { nameFocused = true }
@@ -163,6 +163,7 @@ private struct QuickSetupForm: View {
                 }
                 .pickerStyle(.segmented)
                 TextField("Username", text: $draft.quickUsername, prompt: Text(usernamePrompt))
+                SecureField("Password", text: $draft.quickPassword, prompt: Text(passwordPrompt))
                 TextField("Tags", text: $draft.tagsText, prompt: Text("Comma separated"))
             } footer: {
                 Text(footer)
@@ -184,13 +185,22 @@ private struct QuickSetupForm: View {
         }
     }
 
+    private var passwordPrompt: String {
+        switch draft.quickProtocol {
+        case .ssh: "Leave empty to use your SSH agent"
+        case .vnc, .rdp, .appleScreenSharing: "Optional; asked when connecting if empty"
+        }
+    }
+
     private var footer: String {
+        let hasPassword = !draft.quickPassword.isEmpty
         let connection = switch draft.quickProtocol {
-        case .ssh: "Connects on port 22 with your SSH agent."
-        case .vnc: "Connects on port 5900; the password is asked when connecting."
+        case .ssh: hasPassword ? "Connects on port 22 with the password." : "Connects on port 22 with your SSH agent."
+        case .vnc: hasPassword ? "Connects on port 5900 with the password." : "Connects on port 5900; the password is asked when connecting."
         case .rdp, .appleScreenSharing: "Connects on port 3389 with Network Level Authentication."
         }
-        return connection + " More addresses, authentication and other profiles are under More Options."
+        let keychain = hasPassword ? " The password is kept in Keychain." : ""
+        return connection + keychain + " Key files, more addresses and other profiles are under More Options."
     }
 }
 
