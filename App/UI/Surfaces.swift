@@ -43,3 +43,32 @@ struct Chip: View {
             .background(.quaternary, in: Capsule())
     }
 }
+
+/// A bar directly under the toolbar. On macOS 26 it is a safe-area bar that
+/// shares the toolbar's layer; before that, a `.bar` strip with a hairline.
+struct TopBar<Bar: View>: ViewModifier {
+    let isPresented: Bool
+    @ViewBuilder let bar: () -> Bar
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content.safeAreaBar(edge: .top, spacing: 0) {
+                if isPresented { bar() }
+            }
+        } else {
+            VStack(spacing: 0) {
+                if isPresented {
+                    bar().background(.bar)
+                    Divider()
+                }
+                content
+            }
+        }
+    }
+}
+
+extension View {
+    func topBar(isPresented: Bool, @ViewBuilder content: @escaping () -> some View) -> some View {
+        modifier(TopBar(isPresented: isPresented, bar: content))
+    }
+}

@@ -14,24 +14,26 @@ struct WorkspaceDetailView: View {
     @Environment(ShortcutSettingsStore.self) private var shortcuts
 
     var body: some View {
-        VStack(spacing: 0) {
-            if !sessions.sessions.isEmpty {
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .topBar(isPresented: !sessions.sessions.isEmpty) {
                 SessionTabBar(sessions: sessions, ui: ui)
-                Divider()
             }
-            if let session = sessions.selectedSession {
-                SessionContentView(summary: session, sessions: sessions, ui: ui)
-            } else if let id = ui.selectedMachineID, let machine = store.snapshot.machine(id) {
-                MachineOverviewView(machine: machine, store: store, sessions: sessions, ui: ui)
-            } else {
-                ContentUnavailableView(
-                    "No Machine Selected",
-                    systemImage: "server.rack",
-                    description: Text(shortcuts.hint(for: .newMachine).map { "Choose a machine in the sidebar, or press \($0) to add one." }
-                        ?? "Choose a machine in the sidebar, or add one from the File menu."))
-            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let session = sessions.selectedSession {
+            SessionContentView(summary: session, sessions: sessions, ui: ui)
+        } else if let id = ui.selectedMachineID, let machine = store.snapshot.machine(id) {
+            MachineOverviewView(machine: machine, store: store, sessions: sessions, ui: ui)
+        } else {
+            ContentUnavailableView(
+                "No Machine Selected",
+                systemImage: "server.rack",
+                description: Text(shortcuts.hint(for: .newMachine).map { "Choose a machine in the sidebar, or press \($0) to add one." }
+                    ?? "Choose a machine in the sidebar, or add one from the File menu."))
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -43,28 +45,47 @@ private struct SessionTabBar: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
-                HStack(spacing: 4) {
-                    ForEach(sessions.sessions) { session in
-                        SessionTab(session: session, sessions: sessions, ui: ui)
-                            .id(session.id)
-                    }
-                    Button { ui.showsQuickConnect = true } label: { Image(systemName: "plus") }
-                        .buttonStyle(.borderless)
-                        .padding(.horizontal, 8)
-                        .help("Quick Connect" + shortcuts.hintSuffix(for: .quickConnect))
-                        .accessibilityLabel("Quick Connect")
-                }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 4)
+                SessionTabRow(sessions: sessions, ui: ui)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
             }
             .frame(height: 38)
             .scrollIndicators(.hidden)
-            .background(.bar)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Sessions")
             .onChange(of: sessions.selectedSessionID, initial: true) { _, id in
                 if let id { proxy.scrollTo(id) }
             }
+        }
+    }
+}
+
+/// The tabs and the Quick Connect button. On macOS 26 the selected tab is a
+/// glass capsule, so the row is a glass container for the morph between tabs.
+private struct SessionTabRow: View {
+    let sessions: SessionCoordinator
+    let ui: UIState
+    @Environment(ShortcutSettingsStore.self) private var shortcuts
+
+    var body: some View {
+        if #available(macOS 26, *) {
+            GlassEffectContainer(spacing: 4) { tabs }
+        } else {
+            tabs
+        }
+    }
+
+    private var tabs: some View {
+        HStack(spacing: 4) {
+            ForEach(sessions.sessions) { session in
+                SessionTab(session: session, sessions: sessions, ui: ui)
+                    .id(session.id)
+            }
+            Button { ui.showsQuickConnect = true } label: { Image(systemName: "plus") }
+                .buttonStyle(.borderless)
+                .padding(.horizontal, 8)
+                .help("Quick Connect" + shortcuts.hintSuffix(for: .quickConnect))
+                .accessibilityLabel("Quick Connect")
         }
     }
 }
@@ -99,15 +120,7 @@ private struct SessionTab: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .frame(maxWidth: 220)
-        .background(
-            isSelected ? Color.accentColor.opacity(0.16) : hovering ? Color.primary.opacity(0.05) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 6))
-        .overlay {
-            if isSelected {
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
-            }
-        }
+        .modifier(SessionTabSurface(isSelected: isSelected, hovering: hovering))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture { sessions.select(session.id) }
@@ -137,6 +150,34 @@ private struct SessionTab: View {
         case .connecting, .awaitingUserInput, .disconnecting: .orange
         case .failed: .red
         case .disconnected: .secondary
+        }
+    }
+}
+
+/// Selected: a glass capsule on macOS 26, an accent-tinted rectangle before.
+/// Hovered: a faint fill. Otherwise nothing.
+private struct SessionTabSurface: ViewModifier {
+    let isSelected: Bool
+    let hovering: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            if isSelected {
+                content.glassEffect(.regular.interactive(), in: .capsule)
+            } else {
+                content.background(hovering ? Color.primary.opacity(0.05) : .clear, in: .capsule)
+            }
+        } else {
+            content
+                .background(
+                    isSelected ? Color.accentColor.opacity(0.16) : hovering ? Color.primary.opacity(0.05) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 6))
+                .overlay {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+                    }
+                }
         }
     }
 }
