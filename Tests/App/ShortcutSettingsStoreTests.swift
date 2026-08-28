@@ -10,7 +10,8 @@ import Testing
 struct ShortcutSettingsStoreTests {
     @Test func defaultsMatchTheDocumentedShortcuts() throws {
         let store = try makeStore()
-        #expect(store.shortcut(for: .quickConnect) == Shortcut(.character("k"), [.command]))
+        #expect(store.shortcut(for: .commandPalette) == Shortcut(.character("k"), [.command]))
+        #expect(store.shortcut(for: .quickConnect) == Shortcut(.character("k"), [.command, .shift]))
         #expect(store.shortcut(for: .previousTab) == Shortcut(.tab, [.control, .shift]))
         #expect(store.shortcut(for: .disconnect) == nil)
         #expect(store.hint(for: .closeOtherSessions) == "⌥⌘W")
@@ -23,7 +24,7 @@ struct ShortcutSettingsStoreTests {
         store.assign(Shortcut(.character("d"), [.command, .shift]), to: .disconnect)
         store.assign(nil, to: .findInSession)
         // Assigning the default again drops the override.
-        store.assign(Shortcut(.character("k"), [.command]), to: .quickConnect)
+        store.assign(Shortcut(.character("k"), [.command, .shift]), to: .quickConnect)
 
         let reloaded = ShortcutSettingsStore(defaults: defaults)
         #expect(reloaded.shortcut(for: .disconnect) == Shortcut(.character("d"), [.command, .shift]))
@@ -40,8 +41,8 @@ struct ShortcutSettingsStoreTests {
     @Test func conflictsAreReportedForEveryCommandSharingAShortcut() throws {
         let store = try makeStore()
         store.assign(Shortcut(.character("k"), [.command]), to: .reconnect)
-        #expect(store.conflicts(with: .reconnect) == [.quickConnect])
-        #expect(store.conflicts(with: .quickConnect) == [.reconnect])
+        #expect(store.conflicts(with: .reconnect) == [.commandPalette])
+        #expect(store.conflicts(with: .commandPalette) == [.reconnect])
         #expect(store.conflicts(with: .disconnect).isEmpty)
     }
 

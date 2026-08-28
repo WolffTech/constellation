@@ -10,9 +10,6 @@ struct ConstellationApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var root = CompositionRoot()
 
-    /// Menu shortcuts follow the Settings › Shortcuts assignments.
-    private var shortcuts: ShortcutSettingsStore { root.shortcuts }
-
     var body: some Scene {
         WindowGroup {
             ContentView(root: root)
@@ -22,71 +19,47 @@ struct ConstellationApp: App {
         .defaultSize(width: 1100, height: 700)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Machine") { root.ui.editor = .new }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .newMachine))
+                CommandButton(.newMachine, root: root)
+                CommandButton(.editMachine, root: root)
             }
             // Replaces File › Close: AppKit dispatches ⌘W to the first enabled
             // menu item, so the window's own Close would otherwise win.
             CommandGroup(replacing: .saveItem) {
-                Button("Close Session") {
-                    if let id = root.sessions?.selectedSessionID { root.sessions?.requestClose(sessionID: id) }
-                }
-                .keyboardShortcut(shortcuts.keyboardShortcut(for: .closeSession))
-                .disabled(root.sessions?.selectedSessionID == nil)
-                Button("Close Other Sessions") {
-                    if let id = root.sessions?.selectedSessionID { root.sessions?.requestCloseOthers(keeping: id) }
-                }
-                .keyboardShortcut(shortcuts.keyboardShortcut(for: .closeOtherSessions))
-                .disabled((root.sessions?.sessions.count ?? 0) < 2)
-                Button("Close Window") { NSApplication.shared.keyWindow?.performClose(nil) }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .closeWindow))
+                CommandButton(.closeSession, root: root)
+                CommandButton(.closeOtherSessions, root: root)
+                CommandButton(.closeWindow, root: root)
             }
             CommandGroup(after: .toolbar) {
-                Button("Fit to Window") { root.setDisplayMode(.fit) }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .fitToWindow))
-                    .disabled(!root.selectedSessionIsRemoteDesktop)
-                Button("Actual Size") { root.setDisplayMode(.actualSize) }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .actualSize))
-                    .disabled(!root.selectedSessionIsRemoteDesktop)
+                CommandButton(.commandPalette, root: root)
+                Divider()
+                CommandButton(.fitToWindow, root: root)
+                CommandButton(.actualSize, root: root)
                 Divider()
             }
             CommandGroup(after: .importExport) {
-                Button("Import Machines…") { Task { await ImportExportPanels.importMachines(into: root.store) } }
-                Button("Export Machines…") { ImportExportPanels.exportMachines(from: root.store) }
+                CommandButton(.importMachines, root: root)
+                CommandButton(.exportMachines, root: root)
             }
             CommandMenu("Session") {
-                Button("Quick Connect…") { root.ui.showsQuickConnect = true }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .quickConnect))
-                Button("Connect Default Profile") { root.openDefaultProfile() }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .connectDefaultProfile))
-                    .disabled(root.ui.selectedMachineID == nil)
+                CommandButton(.quickConnect, root: root)
+                CommandButton(.connectDefaultProfile, root: root)
                 Divider()
-                Button("Reconnect") { root.reconnectSelectedSession() }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .reconnect))
-                    .disabled(root.sessions?.selectedSession?.state.hasLiveProcess != false)
-                Button("Disconnect") {
-                    if let id = root.sessions?.selectedSessionID { root.sessions?.disconnect(sessionID: id) }
-                }
-                .keyboardShortcut(shortcuts.keyboardShortcut(for: .disconnect))
-                .disabled(root.sessions?.selectedSession?.state.hasLiveProcess != true)
+                CommandButton(.reconnect, root: root)
+                CommandButton(.disconnect, root: root)
                 Divider()
                 ForEach(1...9, id: \.self) { number in
                     Button("Select Tab \(number)") { root.sessions?.select(number: number) }
                         .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
                         .disabled(root.sessions?.sessions.indices.contains(number - 1) != true)
                 }
-                Button("Next Tab") { root.sessions?.cycleSelection() }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .nextTab))
-                Button("Previous Tab") { root.sessions?.cycleSelection(reverse: true) }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .previousTab))
+                CommandButton(.nextTab, root: root)
+                CommandButton(.previousTab, root: root)
                 Divider()
-                Button("Find in Session") { root.sessions?.performSearch() }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(for: .findInSession))
-                    .disabled(root.sessions?.selectedSessionID == nil)
+                CommandButton(.findInSession, root: root)
             }
             CommandGroup(after: .help) {
                 AcknowledgementsCommand()
-                Button("Save Support Bundle…") { SupportBundlePanel.save(root: root) }
+                CommandButton(.saveSupportBundle, root: root)
             }
         }
 
@@ -98,6 +71,24 @@ struct ConstellationApp: App {
         Settings {
             SettingsView(root: root)
         }
+    }
+}
+
+/// A menu item for a `ShortcutAction`: title, shortcut and enabled state
+/// all come from the root, so the command palette sees the same command.
+private struct CommandButton: View {
+    let action: ShortcutAction
+    let root: CompositionRoot
+
+    init(_ action: ShortcutAction, root: CompositionRoot) {
+        self.action = action
+        self.root = root
+    }
+
+    var body: some View {
+        Button(action.menuTitle) { root.perform(action) }
+            .keyboardShortcut(root.shortcuts.keyboardShortcut(for: action))
+            .disabled(!root.isEnabled(action))
     }
 }
 

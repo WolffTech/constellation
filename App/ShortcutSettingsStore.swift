@@ -7,9 +7,14 @@ import Observation
 import SwiftUI
 
 /// A menu command whose shortcut the user may change. Select Tab 1–9 keep
-/// their fixed ⌘-digit shortcuts and are not listed here.
+/// their fixed ⌘-digit shortcuts and are not listed here. The menus and the
+/// command palette both run these through `CompositionRoot.perform(_:)`.
 enum ShortcutAction: String, CaseIterable, Codable, CodingKeyRepresentable, Identifiable, Sendable {
     case newMachine
+    case editMachine
+    case importMachines
+    case exportMachines
+    case commandPalette
     case quickConnect
     case connectDefaultProfile
     case closeSession
@@ -22,12 +27,17 @@ enum ShortcutAction: String, CaseIterable, Codable, CodingKeyRepresentable, Iden
     case findInSession
     case fitToWindow
     case actualSize
+    case saveSupportBundle
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .newMachine: "New Machine"
+        case .editMachine: "Edit Machine"
+        case .importMachines: "Import Machines"
+        case .exportMachines: "Export Machines"
+        case .commandPalette: "Command Palette"
         case .quickConnect: "Quick Connect"
         case .connectDefaultProfile: "Connect Default Profile"
         case .closeSession: "Close Session"
@@ -40,22 +50,35 @@ enum ShortcutAction: String, CaseIterable, Codable, CodingKeyRepresentable, Iden
         case .findInSession: "Find in Session"
         case .fitToWindow: "Fit to Window"
         case .actualSize: "Actual Size"
+        case .saveSupportBundle: "Save Support Bundle"
+        }
+    }
+
+    /// The menu item text: the title, with an ellipsis when the command opens a dialog.
+    var menuTitle: String {
+        switch self {
+        case .editMachine, .importMachines, .exportMachines, .quickConnect, .saveSupportBundle: title + "…"
+        default: title
         }
     }
 
     /// The menu the command lives in; Settings groups rows by it.
     var menu: String {
         switch self {
-        case .newMachine, .closeSession, .closeOtherSessions, .closeWindow: "File"
-        case .fitToWindow, .actualSize: "View"
+        case .newMachine, .editMachine, .importMachines, .exportMachines, .closeSession, .closeOtherSessions, .closeWindow: "File"
+        case .commandPalette, .fitToWindow, .actualSize: "View"
         case .quickConnect, .connectDefaultProfile, .reconnect, .disconnect, .nextTab, .previousTab, .findInSession: "Session"
+        case .saveSupportBundle: "Help"
         }
     }
 
     var defaultShortcut: Shortcut? {
         switch self {
         case .newMachine: Shortcut(.character("n"), [.command])
-        case .quickConnect: Shortcut(.character("k"), [.command])
+        case .editMachine: Shortcut(.character("e"), [.command])
+        case .importMachines, .exportMachines, .saveSupportBundle: nil
+        case .commandPalette: Shortcut(.character("k"), [.command])
+        case .quickConnect: Shortcut(.character("k"), [.command, .shift])
         case .connectDefaultProfile: Shortcut(.character("t"), [.command])
         case .closeSession: Shortcut(.character("w"), [.command])
         case .closeOtherSessions: Shortcut(.character("w"), [.command, .option])

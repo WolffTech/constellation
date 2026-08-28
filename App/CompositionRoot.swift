@@ -20,6 +20,7 @@ final class CompositionRoot {
     private(set) var startupError: String?
     private(set) var trustedCertificates: TrustedCertificatesModel?
     let ui = UIState()
+    let palette = CommandPaletteController()
     let terminalSettings: TerminalSettingsStore
     let shortcuts: ShortcutSettingsStore
     let vncSettings: VNCSettingsStore
@@ -64,6 +65,81 @@ final class CompositionRoot {
                 rdpDriver: FreeRDPSessionDriver(vault: vault, trustStore: trustStore, settings: { rdpSettings.value }))
         } catch {
             startupError = error.localizedDescription
+        }
+        palette.root = self
+    }
+
+    /// Runs a menu command. Menus and the command palette both come through here.
+    func perform(_ action: ShortcutAction) {
+        switch action {
+        case .newMachine: ui.editor = .new
+        case .editMachine: if let id = ui.selectedMachineID { ui.editor = .edit(id) }
+        case .importMachines: Task { await ImportExportPanels.importMachines(into: store) }
+        case .exportMachines: ImportExportPanels.exportMachines(from: store)
+        case .commandPalette: palette.toggle()
+        case .quickConnect: ui.showsQuickConnect = true
+        case .connectDefaultProfile: openDefaultProfile()
+        case .closeSession: if let sessions, let id = sessions.selectedSessionID { sessions.requestClose(sessionID: id) }
+        case .closeOtherSessions: if let sessions, let id = sessions.selectedSessionID { sessions.requestCloseOthers(keeping: id) }
+        case .closeWindow: (NSApplication.shared.keyWindow ?? NSApplication.shared.mainWindow)?.performClose(nil)
+        case .reconnect: reconnectSelectedSession()
+        case .disconnect: if let sessions, let id = sessions.selectedSessionID { sessions.disconnect(sessionID: id) }
+        case .nextTab: sessions?.cycleSelection()
+        case .previousTab: sessions?.cycleSelection(reverse: true)
+        case .findInSession: sessions?.performSearch()
+        case .fitToWindow: setDisplayMode(.fit)
+        case .actualSize: setDisplayMode(.actualSize)
+        case .saveSupportBundle: SupportBundlePanel.save(root: self)
+        }
+    }
+
+    /// Whether `perform(_:)` would do something right now; menus grey out the rest.
+    func isEnabled(_ action: ShortcutAction) -> Bool {
+        switch action {
+        case .newMachine, .importMachines, .exportMachines, .commandPalette, .quickConnect, .closeWindow,
+             .nextTab, .previousTab, .saveSupportBundle:
+            true
+        case .editMachine, .connectDefaultProfile:
+            ui.selectedMachineID != nil
+        case .closeSession, .findInSession:
+            sessions?.selectedSessionID != nil
+        case .closeOtherSessions:
+            (sessions?.sessions.count ?? 0) >= 2
+        case .reconnect:
+            sessions?.selectedSession?.state.hasLiveProcess == false
+        case .disconnect:
+            sessions?.selectedSession?.state.hasLiveProcess == true
+        case .fitToWindow, .actualSize:
+            selectedSessionIsRemoteDesktop
+        }
+    }
+
+    func paletteItems(for query: String) -> [PaletteItem] {
+        PaletteSearch(
+            snapshot: store?.snapshot ?? .empty,
+            sessions: sessions?.sessions ?? [],
+            isEnabled: { [unowned self] in isEnabled($0) },
+            shortcutHint: { [shortcuts] in shortcuts.hint(for: $0) }
+        ).items(for: query)
+    }
+
+    func perform(_ item: PaletteItem) {
+        switch item.kind {
+        case .session(let id):
+            sessions?.select(id)
+        case .profile(let id):
+            guard let sessions else { return }
+            Task {
+                do { try await sessions.open(profileID: id) }
+                catch { sessions.present(error, title: "Couldn’t Connect") }
+            }
+        case .command(let action):
+            perform(action)
+        case .settings:
+            NSApplication.shared.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        case .quickConnect(let target):
+            guard let sessions else { return }
+            Task { _ = await sessions.openQuickConnect(target) }
         }
     }
 
