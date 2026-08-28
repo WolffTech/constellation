@@ -43,7 +43,7 @@ struct QuickConnectView: View {
                 }
             }
         }
-        .frame(width: 460, height: 220)
+        .frame(width: 460, height: 150)
         .defaultFocus($targetFocused, true)
         .onAppear { targetFocused = true }
     }
@@ -99,7 +99,7 @@ struct SaveQuickConnectView: View {
                 }
             }
         }
-        .frame(width: 440, height: 200)
+        .frame(width: 440, height: 150)
         .defaultFocus($nameFocused, true)
         .onAppear {
             nameFocused = true
