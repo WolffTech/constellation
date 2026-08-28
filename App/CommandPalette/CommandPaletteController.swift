@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import AppKit
+import ConstellationCore
 import Observation
 import SwiftUI
 
@@ -17,12 +18,15 @@ enum PaletteMetrics {
     static let fieldHeight: CGFloat = 56
     static let rowHeight: CGFloat = 44
     static let headerHeight: CGFloat = 24
+    static let noticeHeight: CGFloat = 36
     static let listPadding: CGFloat = 6
     static let maxListHeight: CGFloat = 8 * rowHeight + 2 * headerHeight + 2 * listPadding
 
-    static func listHeight(for items: [PaletteItem]) -> CGFloat {
+    static func listHeight(for items: [PaletteItem], connecting: Bool = false) -> CGFloat {
         guard !items.isEmpty else { return 0 }
-        let headers = items.indices.count { $0 == 0 || items[$0 - 1].section != items[$0].section }
+        let headers = items.indices.count {
+            ($0 == 0 || items[$0 - 1].section != items[$0].section) && !(connecting && items[$0].section == .quickConnect)
+        }
         let total = CGFloat(items.count) * rowHeight + CGFloat(headers) * headerHeight + 2 * listPadding
         return min(total, maxListHeight)
     }
@@ -33,7 +37,12 @@ enum PaletteMetrics {
 @MainActor
 @Observable
 final class CommandPaletteController {
+    /// Search covers everything; connect is ⌘⇧K, a Quick Connect prompt
+    /// with the same panel.
+    enum Mode { case search, connect }
+
     var query = ""
+    private(set) var mode: Mode = .search
     var selectedIndex = 0
     private(set) var isPresented = false
     /// Hover only moves the highlight after the mouse moves; the panel may
@@ -45,7 +54,23 @@ final class CommandPaletteController {
     @ObservationIgnored private var resignObserver: (any NSObjectProtocol)?
 
     var items: [PaletteItem] {
-        root?.paletteItems(for: query) ?? []
+        switch mode {
+        case .search: root?.paletteItems(for: query) ?? []
+        case .connect: root?.quickConnectItems(for: query) ?? []
+        }
+    }
+
+    /// Why the typed text isn't connectable yet; only in connect mode.
+    var notice: String? {
+        guard mode == .connect else { return nil }
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        do {
+            _ = try QuickConnectTarget(parsing: trimmed)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     /// Never past the end, so the highlight survives the list shrinking.
@@ -53,13 +78,15 @@ final class CommandPaletteController {
         min(selectedIndex, max(items.count - 1, 0))
     }
 
-    func toggle() {
-        if isPresented { dismiss() } else { present() }
+    func toggle(mode: Mode = .search) {
+        if isPresented, self.mode == mode { dismiss() } else { present(mode: mode) }
     }
 
-    func present() {
-        guard !isPresented, let root else { return }
+    func present(mode: Mode = .search) {
+        guard let root else { return }
+        if isPresented, self.mode == mode { return }
         let panel = panel ?? makePanel(shortcuts: root.shortcuts)
+        self.mode = mode
         query = ""
         selectedIndex = 0
         followsHover = false
@@ -96,7 +123,8 @@ final class CommandPaletteController {
     }
 
     private func layout(_ panel: NSPanel) {
-        let height = PaletteMetrics.fieldHeight + PaletteMetrics.listHeight(for: items)
+        var height = PaletteMetrics.fieldHeight + PaletteMetrics.listHeight(for: items, connecting: mode == .connect)
+        if notice != nil { height += PaletteMetrics.noticeHeight }
         let anchor = NSApp.mainWindow?.frame ?? NSScreen.main?.visibleFrame ?? .zero
         let top = anchor.maxY - anchor.height * 0.18
         let x = anchor.midX - PaletteMetrics.width / 2

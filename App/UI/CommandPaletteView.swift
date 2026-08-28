@@ -9,12 +9,13 @@ struct CommandPaletteView: View {
 
     var body: some View {
         let items = controller.items
+        let connecting = controller.mode == .connect
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
+                Image(systemName: connecting ? "bolt.horizontal" : "magnifyingglass")
                     .foregroundStyle(.secondary)
                     .font(.title3)
-                TextField("Search machines, sessions, and commands", text: $controller.query)
+                TextField(connecting ? "user@host:port" : "Search machines, sessions, and commands", text: $controller.query)
                     .textFieldStyle(.plain)
                     .font(.title3)
                     .focused($fieldFocused)
@@ -23,10 +24,20 @@ struct CommandPaletteView: View {
             .padding(.horizontal, 16)
             .frame(height: PaletteMetrics.fieldHeight)
 
+            if let notice = controller.notice {
+                Divider()
+                Label(notice, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .frame(height: PaletteMetrics.noticeHeight)
+            }
             if !items.isEmpty {
                 Divider()
                 resultList(items)
-                    .frame(height: PaletteMetrics.listHeight(for: items))
+                    .frame(height: PaletteMetrics.listHeight(for: items, connecting: connecting))
             }
         }
         .frame(width: PaletteMetrics.width)
@@ -41,14 +52,19 @@ struct CommandPaletteView: View {
             controller.layout()
         }
         .onChange(of: items.count) { controller.layout() }
+        .onChange(of: controller.notice) { controller.layout() }
     }
+
+    private var connecting: Bool { controller.mode == .connect }
 
     private func resultList(_ items: [PaletteItem]) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        if index == 0 || items[index - 1].section != item.section {
+                        // Connect mode's typed target needs no heading; it is the prompt's answer.
+                        if index == 0 || items[index - 1].section != item.section,
+                           !(connecting && item.section == .quickConnect) {
                             Text(item.section.title)
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)

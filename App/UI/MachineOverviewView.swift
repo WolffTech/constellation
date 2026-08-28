@@ -65,6 +65,7 @@ private struct SessionTabBar: View {
 private struct SessionTabRow: View {
     let sessions: SessionCoordinator
     let ui: UIState
+    @Environment(CompositionRoot.self) private var root
     @Environment(ShortcutSettingsStore.self) private var shortcuts
 
     var body: some View {
@@ -81,7 +82,7 @@ private struct SessionTabRow: View {
                 SessionTab(session: session, sessions: sessions, ui: ui)
                     .id(session.id)
             }
-            Button { ui.showsQuickConnect = true } label: { Image(systemName: "plus") }
+            Button { root.perform(.quickConnect) } label: { Image(systemName: "plus") }
                 .buttonStyle(.borderless)
                 .padding(.horizontal, 8)
                 .help("Quick Connect" + shortcuts.hintSuffix(for: .quickConnect))

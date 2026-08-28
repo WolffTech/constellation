@@ -30,6 +30,7 @@ struct MainSplitView: View {
     @State private var searchText = ""
     @State private var pendingDelete: Machine?
     @State private var orphanedCredentials: [CredentialReference] = []
+    @State private var saveQuickConnectName = ""
 
     var body: some View {
         NavigationSplitView {
@@ -59,17 +60,26 @@ struct MainSplitView: View {
                 sessions.select(nil)
             }
         }
-        .sheet(isPresented: Binding(get: { ui.showsQuickConnect }, set: { ui.showsQuickConnect = $0 })) {
-            QuickConnectView { target in
-                ui.showsQuickConnect = false
-                Task { _ = await sessions.openQuickConnect(target) }
-            }
+        .onChange(of: ui.saveQuickConnectSessionID) { _, id in
+            guard let id, let session = sessions.sessions.first(where: { $0.id == id }),
+                  case .quick(let target) = session.target else { return }
+            saveQuickConnectName = target.host
         }
-        .sheet(item: Binding(
-            get: { ui.saveQuickConnectSessionID.map(IdentifiedSession.init) },
-            set: { ui.saveQuickConnectSessionID = $0?.id })) { item in
-                SaveQuickConnectView(sessionID: item.id, sessions: sessions, store: store, ui: ui)
-            }
+        .alert(
+            "Save as Machine",
+            isPresented: Binding(
+                get: { ui.saveQuickConnectSessionID != nil },
+                set: { if !$0 { ui.saveQuickConnectSessionID = nil } }),
+            presenting: ui.saveQuickConnectSessionID
+        ) { sessionID in
+            TextField("Name", text: $saveQuickConnectName, prompt: Text("Machine name"))
+            Button("Save") { Task { await saveQuickConnect(sessionID) } }
+                .keyboardShortcut(.defaultAction)
+                .disabled(saveQuickConnectName.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("The session's host becomes the machine's first address and its profile is saved with it.")
+        }
         .alert(
             "Delete \"\(pendingDelete?.name ?? "")\"?",
             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -159,6 +169,18 @@ struct MainSplitView: View {
         }
     }
 
+    private func saveQuickConnect(_ sessionID: SessionID) async {
+        do {
+            let id = try await sessions.saveQuickConnect(
+                sessionID: sessionID,
+                machineName: saveQuickConnectName.trimmingCharacters(in: .whitespaces))
+            await store.reload()
+            ui.selectedMachineID = id
+        } catch {
+            sessions.present(error, title: "Couldn’t Save Machine")
+        }
+    }
+
     private func delete(_ machine: Machine) async {
         sessions.closeSessions(for: machine.id)
         if ui.selectedMachineID == machine.id {
@@ -168,8 +190,4 @@ struct MainSplitView: View {
         let orphans = await store.deleteMachine(machine.id)
         if !orphans.isEmpty { orphanedCredentials = orphans }
     }
-}
-
-private struct IdentifiedSession: Identifiable {
-    let id: SessionID
 }

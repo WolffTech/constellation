@@ -16,7 +16,7 @@ struct PaletteItem: Identifiable, Equatable {
 
     /// Rows are grouped in this order, whatever their scores.
     enum Section: Int, Comparable, CaseIterable {
-        case sessions, machines, commands, quickConnect
+        case sessions, machines, commands, quickConnect, recent
 
         var title: String {
             switch self {
@@ -24,6 +24,7 @@ struct PaletteItem: Identifiable, Equatable {
             case .machines: "Machines"
             case .commands: "Commands"
             case .quickConnect: "Quick Connect"
+            case .recent: "Recent"
             }
         }
 
@@ -36,14 +37,21 @@ struct PaletteItem: Identifiable, Equatable {
     let symbolName: String
     /// Right-aligned text: a shortcut hint or a session state.
     let detail: String?
+    let section: Section
 
-    var section: Section {
-        switch kind {
+    init(kind: Kind, title: String, subtitle: String, symbolName: String, detail: String?, section: Section? = nil) {
+        self.kind = kind
+        self.title = title
+        self.subtitle = subtitle
+        self.symbolName = symbolName
+        self.detail = detail
+        let derived: Section = switch kind {
         case .session: .sessions
         case .profile: .machines
         case .command, .settings: .commands
         case .quickConnect: .quickConnect
         }
+        self.section = section ?? derived
     }
 
     var id: String {
@@ -52,7 +60,7 @@ struct PaletteItem: Identifiable, Equatable {
         case .profile(let id): "profile:\(id)"
         case .command(let action): "command:\(action.rawValue)"
         case .settings: "settings"
-        case .quickConnect(let target): "quick:\(target.displayName)"
+        case .quickConnect(let target): "\(section == .recent ? "recent" : "quick"):\(target.displayName)"
         }
     }
 }
@@ -71,6 +79,29 @@ struct PaletteSearch {
     func items(for query: String) -> [PaletteItem] {
         let terms = query.split(whereSeparator: \.isWhitespace).map { $0.lowercased() }
         return terms.isEmpty ? browse() : search(terms, rawQuery: query)
+    }
+
+    /// Connect mode: the typed target first, then recent targets that match
+    /// what was typed. An empty query lists every recent target.
+    func connectItems(for query: String, recents: [QuickConnectTarget]) -> [PaletteItem] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        var items: [PaletteItem] = []
+        if let target = try? QuickConnectTarget(parsing: trimmed) {
+            items.append(quickConnectItem(target))
+        }
+        let term = trimmed.lowercased()
+        for recent in recents where !items.contains(where: { $0.kind == .quickConnect(recent) }) {
+            guard term.isEmpty || recent.displayName.lowercased().contains(term) else { continue }
+            items.append(quickConnectItem(recent, recent: true))
+        }
+        return items
+    }
+
+    private func quickConnectItem(_ target: QuickConnectTarget, recent: Bool = false) -> PaletteItem {
+        PaletteItem(
+            kind: .quickConnect(target), title: recent ? target.displayName : "Connect to \(target.displayName)",
+            subtitle: "SSH using your agent or OpenSSH configuration",
+            symbolName: "bolt.horizontal", detail: recent ? nil : "⏎", section: recent ? .recent : nil)
     }
 
     /// Empty query: every open session, the favorites (or the first machines), then every command.
@@ -124,9 +155,7 @@ struct PaletteSearch {
         // nothing else matched and it parses as one.
         let looksLikeAddress = rawQuery.contains { "@:.".contains($0) }
         if looksLikeAddress || items.isEmpty, terms.count == 1, let target = try? QuickConnectTarget(parsing: rawQuery) {
-            items.append(PaletteItem(
-                kind: .quickConnect(target), title: "Quick Connect to \(target.displayName)",
-                subtitle: "SSH using your agent or OpenSSH configuration", symbolName: "bolt.horizontal", detail: nil))
+            items.append(quickConnectItem(target))
         }
         return items
     }

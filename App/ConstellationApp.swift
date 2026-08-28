@@ -13,6 +13,7 @@ struct ConstellationApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(root: root)
+                .environment(root)
                 .environment(root.shortcuts)
                 .onAppear { appDelegate.root = root }
         }

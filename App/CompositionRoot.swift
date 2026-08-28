@@ -21,6 +21,7 @@ final class CompositionRoot {
     private(set) var trustedCertificates: TrustedCertificatesModel?
     let ui = UIState()
     let palette = CommandPaletteController()
+    let quickConnectHistory: QuickConnectHistory
     let terminalSettings: TerminalSettingsStore
     let shortcuts: ShortcutSettingsStore
     let vncSettings: VNCSettingsStore
@@ -36,6 +37,7 @@ final class CompositionRoot {
         vncSettings = VNCSettingsStore(defaults: defaults)
         rdpSettings = RDPSettingsStore(defaults: defaults)
         sidebarExpansion = SidebarExpansionStore(defaults: defaults)
+        quickConnectHistory = QuickConnectHistory(defaults: defaults)
         do {
             let vault = KeychainCredentialVault()
             let library = try GRDBMachineLibrary(path: Self.libraryPath())
@@ -77,7 +79,7 @@ final class CompositionRoot {
         case .importMachines: Task { await ImportExportPanels.importMachines(into: store) }
         case .exportMachines: ImportExportPanels.exportMachines(from: store)
         case .commandPalette: palette.toggle()
-        case .quickConnect: ui.showsQuickConnect = true
+        case .quickConnect: palette.present(mode: .connect)
         case .connectDefaultProfile: openDefaultProfile()
         case .closeSession: if let sessions, let id = sessions.selectedSessionID { sessions.requestClose(sessionID: id) }
         case .closeOtherSessions: if let sessions, let id = sessions.selectedSessionID { sessions.requestCloseOthers(keeping: id) }
@@ -123,6 +125,12 @@ final class CompositionRoot {
         ).items(for: query)
     }
 
+    func quickConnectItems(for query: String) -> [PaletteItem] {
+        PaletteSearch(
+            snapshot: .empty, sessions: [], isEnabled: { _ in false }, shortcutHint: { _ in nil }
+        ).connectItems(for: query, recents: quickConnectHistory.targets)
+    }
+
     func perform(_ item: PaletteItem) {
         switch item.kind {
         case .session(let id):
@@ -139,6 +147,7 @@ final class CompositionRoot {
             NSApplication.shared.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         case .quickConnect(let target):
             guard let sessions else { return }
+            quickConnectHistory.record(target)
             Task { _ = await sessions.openQuickConnect(target) }
         }
     }
@@ -233,7 +242,6 @@ final class UIState {
     var selectedMachineID: MachineID?
     /// The profile row highlighted in the sidebar; always belongs to `selectedMachineID`.
     var selectedProfileID: ProfileID?
-    var showsQuickConnect = false
     var saveQuickConnectSessionID: SessionID?
 }
 

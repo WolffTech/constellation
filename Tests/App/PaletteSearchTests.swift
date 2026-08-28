@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import ConstellationCore
+import Foundation
 import Testing
 @testable import Constellation
 
@@ -107,5 +108,49 @@ struct PaletteSearchTests {
         #expect(!search.items(for: "web").contains { $0.section == .quickConnect })
         #expect(search.items(for: "zeta").map(\.kind) == [.quickConnect(QuickConnectTarget(host: "zeta"))])
         #expect(search.items(for: "not a host").isEmpty)
+    }
+}
+
+@MainActor
+struct QuickConnectPaletteTests {
+    private let search = PaletteSearch(snapshot: .empty, sessions: [], isEnabled: { _ in false }, shortcutHint: { _ in nil })
+    private let recents = [
+        QuickConnectTarget(host: "build.tail.net", username: "nick"),
+        QuickConnectTarget(host: "192.0.2.10", port: 2222),
+    ]
+
+    @Test func emptyQueryListsRecents() {
+        let items = search.connectItems(for: "", recents: recents)
+        #expect(items.map(\.kind) == recents.map { .quickConnect($0) })
+        #expect(items.allSatisfy { $0.section == .recent })
+    }
+
+    @Test func typedTargetComesFirstAndFiltersRecents() {
+        let items = search.connectItems(for: "nick@web", recents: recents)
+        #expect(items.map(\.kind) == [.quickConnect(QuickConnectTarget(host: "web", username: "nick"))])
+        #expect(items.first?.section == .quickConnect)
+
+        let filtered = search.connectItems(for: "build", recents: recents)
+        #expect(filtered.map(\.kind) == [.quickConnect(QuickConnectTarget(host: "build")), .quickConnect(recents[0])])
+    }
+
+    @Test func recentMatchingTypedTargetIsNotRepeated() {
+        let items = search.connectItems(for: "nick@build.tail.net", recents: recents)
+        #expect(items.count == 1)
+        #expect(items[0].section == .quickConnect)
+    }
+
+    @Test func malformedQueryYieldsNothing() {
+        #expect(search.connectItems(for: "box:abc", recents: []).isEmpty)
+    }
+
+    @Test func historyKeepsNewestFirstWithoutDuplicates() {
+        let defaults = UserDefaults(suiteName: "QuickConnectHistoryTests-\(UUID())")!
+        let history = QuickConnectHistory(defaults: defaults)
+        history.record(recents[0])
+        history.record(recents[1])
+        history.record(recents[0])
+        #expect(history.targets == [recents[0], recents[1]])
+        #expect(QuickConnectHistory(defaults: defaults).targets == [recents[0], recents[1]])
     }
 }
