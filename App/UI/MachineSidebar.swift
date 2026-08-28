@@ -116,67 +116,49 @@ struct MachineSidebar: View {
         return DisclosureGroup(isExpanded: expansion.binding(for: machine.id)) {
             ForEach(profiles) { profileRow($0, of: machine) }
         } label: {
-            HStack {
-                Label(machine.name, systemImage: "server.rack")
-                Spacer()
-                badge(sessions.openSessionCount(forMachine: machine.id))
-            }
-            .contentShape(Rectangle())
-            .help(hosts(of: machine))
-            .contextMenu {
-                Button("Connect") { connectDefaultProfile(of: machine) }
-                if profiles.count > 1 {
-                    Menu("Connect With") {
-                        ForEach(profiles) { profile in
-                            Button(profile.name, systemImage: profile.protocolKind.symbolName) { connect(profileID: profile.id) }
+            Label(machine.name, systemImage: "server.rack")
+                .badge(sessions.openSessionCount(forMachine: machine.id))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .help(hosts(of: machine))
+                .contextMenu {
+                    Button("Connect") { connectDefaultProfile(of: machine) }
+                    if profiles.count > 1 {
+                        Menu("Connect With") {
+                            ForEach(profiles) { profile in
+                                Button(profile.name, systemImage: profile.protocolKind.symbolName) { connect(profileID: profile.id) }
+                            }
                         }
                     }
+                    Button("Edit…") { ui.editor = .edit(machine.id) }
+                    Button(machine.isFavorite ? "Remove from Favorites" : "Add to Favorites") {
+                        var updated = machine
+                        updated.isFavorite.toggle()
+                        Task { await store.save(.upsertMachine(updated)) }
+                    }
+                    Divider()
+                    Button("Delete…", role: .destructive) { onDelete(machine) }
                 }
-                Button("Edit…") { ui.editor = .edit(machine.id) }
-                Button(machine.isFavorite ? "Remove from Favorites" : "Add to Favorites") {
-                    var updated = machine
-                    updated.isFavorite.toggle()
-                    Task { await store.save(.upsertMachine(updated)) }
-                }
-                Divider()
-                Button("Delete…", role: .destructive) { onDelete(machine) }
-            }
         }
         .tag(SidebarItem.machine(machine.id))
     }
 
     private func profileRow(_ profile: ConnectionProfile, of machine: Machine) -> some View {
-        HStack {
-            Label(profile.name, systemImage: profile.protocolKind.symbolName)
-            Spacer()
-            badge(sessions.openSessionCount(forProfile: profile.id))
-        }
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) { connect(profileID: profile.id) }
-        .help(profileHelp(profile, of: machine))
-        .contextMenu {
-            Button("Connect") { connect(profileID: profile.id) }
-            Button("Edit Machine…") { ui.editor = .edit(machine.id) }
-            if case .rdp(let rdp) = profile {
-                Divider()
-                Button("Forget Trusted Certificate") { forgetCertificate(for: rdp, of: machine) }
+        Label(profile.name, systemImage: profile.protocolKind.symbolName)
+            .badge(sessions.openSessionCount(forProfile: profile.id))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { connect(profileID: profile.id) }
+            .help(profileHelp(profile, of: machine))
+            .contextMenu {
+                Button("Connect") { connect(profileID: profile.id) }
+                Button("Edit Machine…") { ui.editor = .edit(machine.id) }
+                if case .rdp(let rdp) = profile {
+                    Divider()
+                    Button("Forget Trusted Certificate") { forgetCertificate(for: rdp, of: machine) }
+                }
             }
-        }
-        .tag(SidebarItem.profile(profile.id))
-    }
-
-    @ViewBuilder
-    private func badge(_ count: Int) -> some View {
-        if count > 0 {
-            let description = "\(count) open \(count == 1 ? "session" : "sessions")"
-            Text("\(count)")
-                .font(.caption.monospacedDigit())
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(Color.secondary.opacity(0.2)))
-                .help(description)
-                .accessibilityLabel(description)
-        }
+            .tag(SidebarItem.profile(profile.id))
     }
 
     private func hosts(of machine: Machine) -> String {
