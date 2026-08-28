@@ -57,7 +57,7 @@ struct TerminalPane: View {
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(.regularMaterial, in: Capsule())
+                        .glassSurface(in: Capsule())
                         .padding(.top, 8)
                         .accessibilityElement(children: .combine)
                         .accessibilityAddTraits(.updatesFrequently)

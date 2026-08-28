@@ -357,12 +357,7 @@ struct MachineOverviewView: View {
                                     .accessibilityHidden(true)
                                 Text(profile.name)
                                 if machine.defaultProfileID == profile.id {
-                                    Text("Default")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 1)
-                                        .background(.quaternary, in: Capsule())
+                                    Chip("Default")
                                 }
                             }
                             Text(profileDetail(for: profile))
@@ -405,13 +400,7 @@ struct MachineOverviewView: View {
                 }
                 if !machine.tags.isEmpty {
                     HStack(spacing: 6) {
-                        ForEach(machine.tags.sorted(), id: \.self) { tag in
-                            Text(tag)
-                                .font(.caption)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 2)
-                                .background(.quaternary, in: Capsule())
-                        }
+                        ForEach(machine.tags.sorted(), id: \.self) { Chip($0) }
                     }
                 }
             }
@@ -535,7 +524,7 @@ private struct RemoteDesktopPane: View {
                         Text("Connecting…").foregroundStyle(.secondary)
                     }
                     .padding(20)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .glassSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.updatesFrequently)
                 }
@@ -550,7 +539,7 @@ private struct RemoteDesktopPane: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(.regularMaterial, in: Capsule())
+                    .glassSurface(in: Capsule())
                     .padding(.top, 8)
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.updatesFrequently)

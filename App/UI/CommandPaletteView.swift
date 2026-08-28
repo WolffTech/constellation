@@ -30,7 +30,7 @@ struct CommandPaletteView: View {
             }
         }
         .frame(width: PaletteMetrics.width)
-        .modifier(PaletteSurface())
+        .glassSurface(in: RoundedRectangle(cornerRadius: PaletteMetrics.cornerRadius, style: .continuous))
         .onAppear { fieldFocused = true }
         .onChange(of: controller.isPresented) { _, presented in
             if presented { fieldFocused = true }
@@ -70,25 +70,6 @@ struct CommandPaletteView: View {
                 guard items.indices.contains(index) else { return }
                 proxy.scrollTo(items[index].id, anchor: nil)
             }
-        }
-    }
-}
-
-/// Liquid Glass on macOS 26 and later; a material with a hairline before that.
-/// The panel behind is transparent, so the glass samples the app window.
-private struct PaletteSurface: ViewModifier {
-    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: PaletteMetrics.cornerRadius, style: .continuous) }
-
-    func body(content: Content) -> some View {
-        if #available(macOS 26, *) {
-            content
-                .clipShape(shape)
-                .glassEffect(.regular, in: shape)
-        } else {
-            content
-                .clipShape(shape)
-                .background(.regularMaterial, in: shape)
-                .overlay(shape.strokeBorder(.separator))
         }
     }
 }

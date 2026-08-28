@@ -219,12 +219,7 @@ private struct SSHProfileSection: View {
             HStack(spacing: 8) {
                 Label(title, systemImage: "terminal")
                 if isDefault {
-                    Text("Default")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(.quaternary, in: Capsule())
+                    Chip("Default")
                 } else {
                     Button("Make Default", action: onMakeDefault)
                         .controlSize(.small)
@@ -299,12 +294,7 @@ private struct VNCProfileSection: View {
             HStack(spacing: 8) {
                 Label(title, systemImage: ConnectionProtocol.vnc.symbolName)
                 if isDefault {
-                    Text("Default")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(.quaternary, in: Capsule())
+                    Chip("Default")
                 } else {
                     Button("Make Default", action: onMakeDefault)
                         .controlSize(.small)
@@ -363,12 +353,7 @@ private struct RDPProfileSection: View {
             HStack(spacing: 8) {
                 Label(title, systemImage: ConnectionProtocol.rdp.symbolName)
                 if isDefault {
-                    Text("Default")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(.quaternary, in: Capsule())
+                    Chip("Default")
                 } else {
                     Button("Make Default", action: onMakeDefault)
                         .controlSize(.small)
