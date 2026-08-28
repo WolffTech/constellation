@@ -13,30 +13,37 @@ struct QuickConnectView: View {
     let onConnect: (QuickConnectTarget) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Quick Connect").font(.title2.bold())
-            TextField("user@host:port", text: $targetText)
-                .textFieldStyle(.roundedBorder)
-                .focused($targetFocused)
-                .onSubmit(connect)
-                .onChange(of: targetText) { validationMessage = nil }
-            Text("Uses your SSH agent or OpenSSH configuration. Quick Connect tabs are not restored after relaunch.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            if let validationMessage {
-                Text(validationMessage).foregroundStyle(.red).font(.callout)
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Target", text: $targetText, prompt: Text("user@host:port"))
+                        .focused($targetFocused)
+                        .onSubmit(connect)
+                        .onChange(of: targetText) { validationMessage = nil }
+                    if let validationMessage {
+                        Label(validationMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                            .font(.callout)
+                    }
+                } footer: {
+                    Text("Uses your SSH agent or OpenSSH configuration. Quick Connect tabs are not restored after relaunch.")
+                }
             }
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Connect", action: connect)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(targetText.trimmingCharacters(in: .whitespaces).isEmpty)
+            .formStyle(.grouped)
+            .navigationTitle("Quick Connect")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", role: .cancel) { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Connect", action: connect)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(targetText.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
             }
         }
-        .padding(20)
-        .frame(width: 440)
+        .frame(width: 460, height: 220)
         .defaultFocus($targetFocused, true)
         .onAppear { targetFocused = true }
     }
@@ -62,25 +69,37 @@ struct SaveQuickConnectView: View {
     let ui: UIState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Save as Machine").font(.title2.bold())
-            TextField("Machine name", text: $machineName)
-                .textFieldStyle(.roundedBorder)
-                .focused($nameFocused)
-                .onSubmit(save)
-                .onChange(of: machineName) { errorMessage = nil }
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.callout) }
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Save", action: save)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(machineName.trimmingCharacters(in: .whitespaces).isEmpty)
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name", text: $machineName, prompt: Text("Machine name"))
+                        .focused($nameFocused)
+                        .onSubmit(save)
+                        .onChange(of: machineName) { errorMessage = nil }
+                    if let errorMessage {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                            .font(.callout)
+                    }
+                } footer: {
+                    Text("The session's host becomes the machine's first address and its profile is saved with it.")
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Save as Machine")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", role: .cancel) { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: save)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(machineName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
             }
         }
-        .padding(20)
-        .frame(width: 400)
+        .frame(width: 440, height: 200)
         .defaultFocus($nameFocused, true)
         .onAppear {
             nameFocused = true

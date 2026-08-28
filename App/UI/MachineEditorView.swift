@@ -27,27 +27,7 @@ struct MachineEditorView: View {
     private var hasChanges: Bool { draft != original }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Image(systemName: "server.rack")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(draft.isNew ? "Add Machine" : "Edit Machine")
-                        .font(.title2.bold())
-                    Text("Define how Constellation finds and connects to this machine.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 20)
-            .padding(.bottom, 14)
-
-            Divider()
-
+        NavigationStack {
             Form {
                 Section("Machine") {
                     TextField("Name", text: $draft.machine.name, prompt: Text("Machine name"))
@@ -106,18 +86,18 @@ struct MachineEditorView: View {
                 }
             }
             .formStyle(.grouped)
-
-            Divider()
-            HStack {
-                Spacer()
-                Button("Cancel", action: cancel)
-                    .keyboardShortcut(.cancelAction)
-                Button(draft.isNew ? "Add Machine" : "Save") { Task { await save() } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(saving)
+            .navigationTitle(draft.isNew ? "Add Machine" : "Edit Machine")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: cancel)
+                        .keyboardShortcut(.cancelAction)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(draft.isNew ? "Add Machine" : "Save") { Task { await save() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(saving)
+                }
             }
-            .padding()
-            .background(.bar)
         }
         .frame(minWidth: 680, idealWidth: 720, minHeight: 620, idealHeight: 700)
         .interactiveDismissDisabled(saving || hasChanges)
