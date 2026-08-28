@@ -72,14 +72,15 @@ struct MachineSidebar: View {
                 case .machine(let id):
                     ui.selectedMachineID = id
                     ui.selectedProfileID = nil
+                    sessions.select(nil)
                 case .profile(let id):
+                    guard sessions.selectFirstSession(forProfile: id) else { return }
                     ui.selectedMachineID = store.snapshot.profile(id)?.machineID
                     ui.selectedProfileID = id
                 case nil:
                     ui.selectedMachineID = nil
                     ui.selectedProfileID = nil
                 }
-                if item != nil { sessions.select(nil) }
             })
     }
 
@@ -118,10 +119,9 @@ struct MachineSidebar: View {
             HStack {
                 Label(machine.name, systemImage: "server.rack")
                 Spacer()
-                badge(sessions.count(for: machine.id))
+                badge(sessions.openSessionCount(forMachine: machine.id))
             }
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) { connectDefaultProfile(of: machine) }
             .help(hosts(of: machine))
             .contextMenu {
                 Button("Connect") { connectDefaultProfile(of: machine) }
@@ -149,7 +149,7 @@ struct MachineSidebar: View {
         HStack {
             Label(profile.name, systemImage: profile.protocolKind.symbolName)
             Spacer()
-            badge(sessions.count(forProfile: profile.id))
+            badge(sessions.openSessionCount(forProfile: profile.id))
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { connect(profileID: profile.id) }
@@ -168,12 +168,12 @@ struct MachineSidebar: View {
     @ViewBuilder
     private func badge(_ count: Int) -> some View {
         if count > 0 {
-            let description = "\(count) active \(count == 1 ? "session" : "sessions")"
+            let description = "\(count) open \(count == 1 ? "session" : "sessions")"
             Text("\(count)")
                 .font(.caption.monospacedDigit())
                 .padding(.horizontal, 6)
                 .padding(.vertical, 1)
-                .background(Capsule().fill(Color.green.opacity(0.3)))
+                .background(Capsule().fill(Color.secondary.opacity(0.2)))
                 .help(description)
                 .accessibilityLabel(description)
         }
@@ -189,6 +189,7 @@ struct MachineSidebar: View {
         if let username = profile.username, !username.isEmpty { parts.append(username) }
         if let port = profile.port, port != profile.protocolKind.defaultPort { parts.append("port \(port)") }
         if machine.defaultProfileID == profile.id { parts.append("default") }
+        parts.append("double-click to open a new session")
         return parts.joined(separator: " · ")
     }
 

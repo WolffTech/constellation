@@ -35,9 +35,9 @@ struct SessionCoordinatorTests {
         #expect(coordinator.sessions.first(where: { $0.id == id })?.state.isConnecting == true)
         session.terminal.emit(.titleChanged("constellation-connected:\(session.exitStatusChannel.token)"))
         #expect(coordinator.sessions.first(where: { $0.id == id })?.state.isConnected == true)
-        #expect(coordinator.count(for: machine.id) == 1)
-        #expect(coordinator.count(forProfile: profile.id) == 1)
-        #expect(coordinator.count(forProfile: ProfileID()) == 0)
+        #expect(coordinator.openSessionCount(forMachine: machine.id) == 1)
+        #expect(coordinator.openSessionCount(forProfile: profile.id) == 1)
+        #expect(coordinator.openSessionCount(forProfile: ProfileID()) == 0)
     }
 
     @Test func pinnedProfilesNeverProbeFallbackAddresses() async throws {
@@ -206,7 +206,7 @@ struct SessionCoordinatorTests {
 
         session.emit(.stateChanged(.connected))
         #expect(coordinator.sessions.first?.state.isConnected == true)
-        #expect(coordinator.count(forProfile: profile.id) == 1)
+        #expect(coordinator.openSessionCount(forProfile: profile.id) == 1)
 
         coordinator.disconnect(sessionID: id)
         #expect(coordinator.sessions.first?.state == .disconnecting)
@@ -214,6 +214,32 @@ struct SessionCoordinatorTests {
         session.emit(.stateChanged(.disconnected(nil)))
         #expect(coordinator.sessions.first?.state == .disconnected)
         #expect(coordinator.remoteDesktop(for: id) == nil)
+    }
+
+    @Test func selectingAProfileUsesItsFirstOpenTabRegardlessOfConnectionState() async throws {
+        let (coordinator, _, profile, _) = try await coordinatorWithOneMachine()
+        let first = try await coordinator.open(profileID: profile.id)
+        coordinator.disconnect(sessionID: first)
+        let second = try await coordinator.open(profileID: profile.id)
+        #expect(coordinator.selectedSessionID == second)
+        #expect(coordinator.openSessionCount(forProfile: profile.id) == 2)
+
+        #expect(coordinator.selectFirstSession(forProfile: profile.id))
+
+        #expect(coordinator.selectedSessionID == first)
+    }
+
+    @Test func selectingAProfileWithoutAnOpenTabDoesNothing() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let coordinator = SessionCoordinator(
+            library: library,
+            prober: StubProber(),
+            driver: StubSSHDriver())
+        let selected = await coordinator.openQuickConnect(QuickConnectTarget(host: "quick.box"))
+
+        #expect(!coordinator.selectFirstSession(forProfile: ProfileID()))
+
+        #expect(coordinator.selectedSessionID == selected)
     }
 
     @Test func vncAuthenticationFailuresAreReportedAsSuch() async throws {

@@ -91,14 +91,22 @@ final class SessionCoordinator {
         }
     }
 
-    /// Connected sessions for a machine.
-    func count(for machineID: MachineID) -> Int {
-        sessions.count { $0.machineID == machineID && $0.state.isConnected }
+    /// Open workspace tabs for a machine, regardless of connection state.
+    func openSessionCount(forMachine machineID: MachineID) -> Int {
+        sessions.count { $0.machineID == machineID }
     }
 
-    /// Connected sessions for one profile.
-    func count(forProfile profileID: ProfileID) -> Int {
-        sessions.count { $0.profileID == profileID && $0.state.isConnected }
+    /// Open workspace tabs for one profile, regardless of connection state.
+    func openSessionCount(forProfile profileID: ProfileID) -> Int {
+        sessions.count { $0.profileID == profileID }
+    }
+
+    /// Selects the first matching tab in the current tab order.
+    @discardableResult
+    func selectFirstSession(forProfile profileID: ProfileID) -> Bool {
+        guard let sessionID = sessions.first(where: { $0.profileID == profileID })?.id else { return false }
+        select(sessionID)
+        return true
     }
 
     @discardableResult
