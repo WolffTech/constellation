@@ -12,47 +12,53 @@ struct TrustedCertificatesView: View {
     @State private var selection: Set<TrustedCertificate.ID> = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Servers whose certificate you chose to Always Trust. Remove one to be asked again on the next connection.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            if model.certificates.isEmpty {
-                ContentUnavailableView(
-                    "No Trusted Certificates",
-                    systemImage: "checkmark.shield",
-                    description: Text("A server appears here after you choose Always Trust on its certificate prompt."))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                Table(model.certificates, selection: $selection) {
-                    TableColumn("Server") { certificate in
-                        Text("\(certificate.host):\(String(certificate.port))")
+        Form {
+            Section {
+                if model.certificates.isEmpty {
+                    ContentUnavailableView(
+                        "No Trusted Certificates",
+                        systemImage: "checkmark.shield",
+                        description: Text("A server appears here after you choose Always Trust on its certificate prompt."))
+                    .frame(maxWidth: .infinity, minHeight: 240)
+                } else {
+                    Table(model.certificates, selection: $selection) {
+                        TableColumn("Server") { certificate in
+                            Text("\(certificate.host):\(String(certificate.port))")
+                        }
+                        TableColumn("Issued To") { certificate in
+                            Text(certificate.commonName.isEmpty ? certificate.subject : certificate.commonName)
+                        }
+                        TableColumn("Issuer") { certificate in
+                            Text(certificate.issuer)
+                        }
+                        TableColumn("Trusted") { certificate in
+                            Text(certificate.trustedAt.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
+                        }
+                        .width(min: 80, ideal: 100)
+                        TableColumn("SHA-256") { certificate in
+                            Text(certificate.fingerprint)
+                                .font(.system(.body, design: .monospaced))
+                                .textSelection(.enabled)
+                                .help(certificate.fingerprint)
+                        }
                     }
-                    TableColumn("Issued To") { certificate in
-                        Text(certificate.commonName.isEmpty ? certificate.subject : certificate.commonName)
-                    }
-                    TableColumn("Issuer") { certificate in
-                        Text(certificate.issuer)
-                    }
-                    TableColumn("Trusted") { certificate in
-                        Text(certificate.trustedAt.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—")
-                    }
-                    .width(min: 80, ideal: 100)
-                    TableColumn("SHA-256") { certificate in
-                        Text(certificate.fingerprint)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
-                            .help(certificate.fingerprint)
-                    }
+                    .frame(minHeight: 240)
+                    .onDeleteCommand(perform: forgetSelection)
                 }
-                .onDeleteCommand(perform: forgetSelection)
-                HStack {
-                    Button("Remove", role: .destructive, action: forgetSelection)
-                        .disabled(selection.isEmpty)
-                    Spacer()
+            } footer: {
+                Text("Servers whose certificate you chose to Always Trust. Remove one to be asked again on the next connection.")
+            }
+            if !model.certificates.isEmpty {
+                Section {
+                    HStack {
+                        Spacer()
+                        Button("Remove", role: .destructive, action: forgetSelection)
+                            .disabled(selection.isEmpty)
+                    }
                 }
             }
         }
-        .padding()
+        .formStyle(.grouped)
         .task { await model.load() }
         .alert("Trusted certificates could not be updated", isPresented: Binding(
             get: { model.presentedError != nil },
