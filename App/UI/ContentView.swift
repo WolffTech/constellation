@@ -32,7 +32,58 @@ struct MainSplitView: View {
     @State private var orphanedCredentials: [CredentialReference] = []
     @State private var saveQuickConnectName = ""
 
+    // Split in two: one long modifier chain with inline bindings takes the
+    // type checker past its time limit on some toolchains.
     var body: some View {
+        splitView
+            .alert("Save as Machine", isPresented: saveQuickConnectPresented, presenting: ui.saveQuickConnectSessionID) { sessionID in
+                TextField("Name", text: $saveQuickConnectName, prompt: Text("Machine name"))
+                Button("Save") { Task { await saveQuickConnect(sessionID) } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(saveQuickConnectName.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("The session's host becomes the machine's first address and its profile is saved with it.")
+            }
+            .alert(deleteAlertTitle, isPresented: deletePresented, presenting: pendingDelete) { machine in
+                Button("Delete", role: .destructive) { Task { await delete(machine) } }
+                    .keyboardShortcut(.defaultAction)
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("Its addresses and profiles are removed and any open session is closed.")
+            }
+            .alert("Remove unused credentials from Keychain?", isPresented: orphanedCredentialsPresented) {
+                Button("Remove", role: .destructive) {
+                    let credentials = orphanedCredentials
+                    Task { await store.removeCredentials(credentials) }
+                }
+                .keyboardShortcut(.defaultAction)
+                Button("Keep", role: .cancel) {}
+            } message: {
+                Text("No profile uses:\n" + orphanedCredentials.map(\.label).joined(separator: "\n"))
+            }
+            .alert(closeAlertTitle, isPresented: closePresented) {
+                Button(closeAlertAction, role: .destructive) { sessions.confirmPendingClose() }
+                    .keyboardShortcut(.defaultAction)
+                Button("Cancel", role: .cancel) { sessions.pendingClose = nil }
+            } message: {
+                Text(closeAlertMessage)
+            }
+            .alert("Couldn’t Update Library", isPresented: storeErrorPresented) {
+                Button("OK") {}
+                    .keyboardShortcut(.defaultAction)
+            } message: {
+                Text(store.presentedError ?? "")
+            }
+            .alert(sessions.presentedError?.title ?? "", isPresented: sessionErrorPresented) {
+                Button("OK") {}
+                    .keyboardShortcut(.defaultAction)
+            } message: {
+                Text(sessions.presentedError?.message ?? "")
+            }
+    }
+
+    private var splitView: some View {
         NavigationSplitView {
             MachineSidebar(store: store, sessions: sessions, ui: ui, expansion: expansion,
                            trustedCertificates: trustedCertificates, searchText: $searchText) { pendingDelete = $0 }
@@ -65,69 +116,26 @@ struct MainSplitView: View {
                   case .quick(let target) = session.target else { return }
             saveQuickConnectName = target.host
         }
-        .alert(
-            "Save as Machine",
-            isPresented: Binding(
-                get: { ui.saveQuickConnectSessionID != nil },
-                set: { if !$0 { ui.saveQuickConnectSessionID = nil } }),
-            presenting: ui.saveQuickConnectSessionID
-        ) { sessionID in
-            TextField("Name", text: $saveQuickConnectName, prompt: Text("Machine name"))
-            Button("Save") { Task { await saveQuickConnect(sessionID) } }
-                .keyboardShortcut(.defaultAction)
-                .disabled(saveQuickConnectName.trimmingCharacters(in: .whitespaces).isEmpty)
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("The session's host becomes the machine's first address and its profile is saved with it.")
-        }
-        .alert(
-            "Delete \"\(pendingDelete?.name ?? "")\"?",
-            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-            presenting: pendingDelete
-        ) { machine in
-            Button("Delete", role: .destructive) { Task { await delete(machine) } }
-                .keyboardShortcut(.defaultAction)
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("Its addresses and profiles are removed and any open session is closed.")
-        }
-        .alert(
-            "Remove unused credentials from Keychain?",
-            isPresented: Binding(get: { !orphanedCredentials.isEmpty }, set: { if !$0 { orphanedCredentials = [] } })
-        ) {
-            Button("Remove", role: .destructive) {
-                let credentials = orphanedCredentials
-                Task { await store.removeCredentials(credentials) }
-            }
-            .keyboardShortcut(.defaultAction)
-            Button("Keep", role: .cancel) {}
-        } message: {
-            Text("No profile uses:\n" + orphanedCredentials.map(\.label).joined(separator: "\n"))
-        }
-        .alert(
-            closeAlertTitle,
-            isPresented: Binding(
-                get: { sessions.pendingClose != nil },
-                set: { if !$0 { sessions.pendingClose = nil } })
-        ) {
-            Button(closeAlertAction, role: .destructive) { sessions.confirmPendingClose() }
-                .keyboardShortcut(.defaultAction)
-            Button("Cancel", role: .cancel) { sessions.pendingClose = nil }
-        } message: {
-            Text(closeAlertMessage)
-        }
-        .alert("Couldn’t Update Library", isPresented: storeErrorPresented) {
-            Button("OK") {}
-                .keyboardShortcut(.defaultAction)
-        } message: {
-            Text(store.presentedError ?? "")
-        }
-        .alert(sessions.presentedError?.title ?? "", isPresented: sessionErrorPresented) {
-            Button("OK") {}
-                .keyboardShortcut(.defaultAction)
-        } message: {
-            Text(sessions.presentedError?.message ?? "")
-        }
+    }
+
+    private var saveQuickConnectPresented: Binding<Bool> {
+        Binding(
+            get: { ui.saveQuickConnectSessionID != nil },
+            set: { if !$0 { ui.saveQuickConnectSessionID = nil } })
+    }
+
+    private var deleteAlertTitle: String { "Delete \"\(pendingDelete?.name ?? "")\"?" }
+
+    private var deletePresented: Binding<Bool> {
+        Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })
+    }
+
+    private var orphanedCredentialsPresented: Binding<Bool> {
+        Binding(get: { !orphanedCredentials.isEmpty }, set: { if !$0 { orphanedCredentials = [] } })
+    }
+
+    private var closePresented: Binding<Bool> {
+        Binding(get: { sessions.pendingClose != nil }, set: { if !$0 { sessions.pendingClose = nil } })
     }
 
     private var closeAlertTitle: String {
