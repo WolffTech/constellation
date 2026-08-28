@@ -79,8 +79,10 @@ private struct PaletteRow: View {
     let item: PaletteItem
     let isSelected: Bool
 
-    /// The system's text-on-selection color, so the row follows the accent
-    /// and high-contrast settings like a list selection does.
+    /// The system's selection colors, so the row follows the accent and
+    /// high-contrast settings like a list selection does. Not `.selection`:
+    /// a borderless panel is never "emphasized", so that renders gray.
+    private var selectedFill: Color { Color(nsColor: .selectedContentBackgroundColor) }
     private var selectedText: Color { Color(nsColor: .alternateSelectedControlTextColor) }
 
     var body: some View {
@@ -116,9 +118,9 @@ private struct PaletteRow: View {
     @ViewBuilder
     private var highlight: some View {
         if #available(macOS 26, *) {
-            ConcentricRectangle(corners: .concentric(minimum: .fixed(6))).fill(.selection)
+            ConcentricRectangle(corners: .concentric(minimum: .fixed(6))).fill(selectedFill)
         } else {
-            RoundedRectangle(cornerRadius: PaletteMetrics.rowCornerRadius, style: .continuous).fill(.selection)
+            RoundedRectangle(cornerRadius: PaletteMetrics.rowCornerRadius, style: .continuous).fill(selectedFill)
         }
     }
 }
