@@ -211,3 +211,35 @@ struct MachineDraftTests {
         #expect(draft.removedCredentialIDs == [credential.id])
     }
 }
+
+struct QuickSetupDraftTests {
+    @Test func newDraftEditsItsFirstAddressAndProfile() {
+        var draft = MachineDraft(newMachine: "box")
+        draft.quickHost = "box.example.com"
+        draft.quickUsername = "nick"
+        #expect(draft.addresses.map(\.host) == ["box.example.com"])
+        #expect(draft.quickProtocol == .ssh)
+        #expect(draft.profiles.first?.profile.username == "nick")
+    }
+
+    @Test func switchingProtocolReplacesTheProfileAndKeepsTheUsername() throws {
+        var draft = MachineDraft(newMachine: "box")
+        draft.quickHost = "box.example.com"
+        draft.quickUsername = "nick"
+        draft.quickProtocol = .rdp
+        #expect(draft.profiles.isEmpty && draft.vncProfiles.isEmpty)
+        #expect(draft.rdpProfiles.first?.profile.username == "nick")
+        #expect(draft.quickUsername == "nick")
+
+        draft.quickProtocol = .vnc
+        #expect(draft.rdpProfiles.isEmpty)
+        #expect(draft.vncProfiles.first?.profile.username == "nick")
+        #expect(draft.effectiveDefaultProfileID == draft.vncProfiles.first?.id)
+
+        // Saving a switched draft yields exactly one profile, the default.
+        guard case .batch(let changes) = try draft.change() else { Issue.record("expected a batch"); return }
+        let profiles = changes.compactMap { if case .upsertProfile(let p) = $0 { p } else { nil } }
+        #expect(profiles.count == 1)
+        #expect(profiles.first?.protocolKind == .vnc)
+    }
+}

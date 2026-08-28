@@ -76,6 +76,9 @@ struct MachineDraft: Equatable {
     /// Every profile id in editor order: SSH, then VNC, then RDP.
     var profileIDs: [ProfileID] { profiles.map(\.id) + vncProfiles.map(\.id) + rdpProfiles.map(\.id) }
 
+    /// What `change()` will save as the default: the chosen profile, else the first.
+    var effectiveDefaultProfileID: ProfileID? { machine.defaultProfileID ?? profileIDs.first }
+
     mutating func addAddress() {
         addresses.append(MachineAddress(machineID: machine.id, label: "", host: "", priority: addresses.count))
     }
@@ -168,6 +171,54 @@ struct MachineDraft: Equatable {
         let change = MachineLibraryChange.batch(changes)
         try Validator.validate(change)
         return change
+    }
+}
+
+/// The quick Add Machine form: one host and one profile, edited by field
+/// rather than by list.
+extension MachineDraft {
+    /// The first address's host; the quick form edits only that one.
+    var quickHost: String {
+        get { addresses.first?.host ?? "" }
+        set {
+            if addresses.isEmpty { addAddress() }
+            addresses[0].host = newValue
+        }
+    }
+
+    /// The single protocol a quick setup creates. Changing it replaces the
+    /// profile, carrying the username across.
+    var quickProtocol: ConnectionProtocol {
+        get {
+            if !profiles.isEmpty { .ssh } else if !vncProfiles.isEmpty { .vnc } else if !rdpProfiles.isEmpty { .rdp } else { .ssh }
+        }
+        set {
+            guard newValue != quickProtocol else { return }
+            let username = quickUsername
+            profiles = []
+            vncProfiles = []
+            rdpProfiles = []
+            machine.defaultProfileID = nil
+            switch newValue {
+            case .ssh: profiles = [SSHProfileDraft(profile: SSHProfile(machineID: machine.id))]
+            case .vnc: vncProfiles = [VNCProfileDraft(profile: VNCProfile(machineID: machine.id))]
+            case .rdp: rdpProfiles = [RDPProfileDraft(profile: RDPProfile(machineID: machine.id))]
+            case .appleScreenSharing: profiles = [SSHProfileDraft(profile: SSHProfile(machineID: machine.id))]
+            }
+            quickUsername = username
+        }
+    }
+
+    var quickUsername: String {
+        get {
+            profiles.first?.profile.username ?? vncProfiles.first?.profile.username ?? rdpProfiles.first?.profile.username ?? ""
+        }
+        set {
+            let value = newValue.isEmpty ? nil : newValue
+            if !profiles.isEmpty { profiles[0].profile.username = value }
+            else if !vncProfiles.isEmpty { vncProfiles[0].profile.username = value }
+            else if !rdpProfiles.isEmpty { rdpProfiles[0].profile.username = value }
+        }
     }
 }
 
