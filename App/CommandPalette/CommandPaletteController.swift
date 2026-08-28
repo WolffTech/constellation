@@ -10,7 +10,9 @@ import SwiftUI
 enum PaletteMetrics {
     static let width: CGFloat = 620
     static let cornerRadius: CGFloat = 20
+    static var panelShape: RoundedRectangle { RoundedRectangle(cornerRadius: cornerRadius, style: .continuous) }
     /// Concentric with the panel corner across the list's horizontal padding.
+    /// Only the pre-26 fallback needs it; ConcentricRectangle works it out.
     static let rowCornerRadius: CGFloat = cornerRadius - 8
     static let fieldHeight: CGFloat = 56
     static let rowHeight: CGFloat = 44

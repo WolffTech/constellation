@@ -30,7 +30,8 @@ struct CommandPaletteView: View {
             }
         }
         .frame(width: PaletteMetrics.width)
-        .glassSurface(in: RoundedRectangle(cornerRadius: PaletteMetrics.cornerRadius, style: .continuous))
+        .containerShape(PaletteMetrics.panelShape)
+        .glassSurface(in: PaletteMetrics.panelShape)
         .onAppear { fieldFocused = true }
         .onChange(of: controller.isPresented) { _, presented in
             if presented { fieldFocused = true }
@@ -78,34 +79,46 @@ private struct PaletteRow: View {
     let item: PaletteItem
     let isSelected: Bool
 
+    /// The system's text-on-selection color, so the row follows the accent
+    /// and high-contrast settings like a list selection does.
+    private var selectedText: Color { Color(nsColor: .alternateSelectedControlTextColor) }
+
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: item.symbolName)
                 .font(.title3)
                 .frame(width: 24)
-                .foregroundStyle(isSelected ? .white : .secondary)
+                .foregroundStyle(isSelected ? selectedText : .secondary)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title).lineLimit(1)
                 Text(item.subtitle)
                     .font(.callout)
-                    .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
+                    .foregroundStyle(isSelected ? selectedText.opacity(0.8) : .secondary)
                     .lineLimit(1)
             }
             Spacer()
             if let detail = item.detail {
                 Text(detail)
                     .font(.callout.monospaced())
-                    .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
+                    .foregroundStyle(isSelected ? selectedText.opacity(0.8) : .secondary)
             }
         }
         .padding(.horizontal, 10)
         .frame(height: PaletteMetrics.rowHeight)
         .contentShape(Rectangle())
-        .background(
-            RoundedRectangle(cornerRadius: PaletteMetrics.rowCornerRadius, style: .continuous)
-                .fill(isSelected ? Color.accentColor : .clear))
-        .foregroundStyle(isSelected ? .white : .primary)
+        .background { if isSelected { highlight } }
+        .foregroundStyle(isSelected ? selectedText : .primary)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// Concentric with the panel on macOS 26; a fixed radius before that.
+    @ViewBuilder
+    private var highlight: some View {
+        if #available(macOS 26, *) {
+            ConcentricRectangle(corners: .concentric(minimum: .fixed(6))).fill(.selection)
+        } else {
+            RoundedRectangle(cornerRadius: PaletteMetrics.rowCornerRadius, style: .continuous).fill(.selection)
+        }
     }
 }
