@@ -182,13 +182,32 @@ private struct SessionTabSurface: ViewModifier {
     }
 }
 
-/// The actions a session offers, shared by the toolbar and the tab context menu.
+/// Every action a session offers, for the tab context menu. The toolbar
+/// shows the same groups separated by spacers.
 private struct SessionActions: View {
     let summary: SessionSummary
     let sessions: SessionCoordinator
     let ui: UIState
     var includesClose = false
-    @Environment(ShortcutSettingsStore.self) private var shortcuts
+
+    var body: some View {
+        SessionMachineActions(summary: summary, sessions: sessions, ui: ui)
+        SessionConnectionActions(summary: summary, sessions: sessions)
+        SessionDisplayActions(summary: summary, sessions: sessions)
+        if includesClose {
+            Divider()
+            Button("Close") { sessions.requestClose(sessionID: summary.id) }
+            Button("Close Others") { sessions.requestCloseOthers(keeping: summary.id) }
+                .disabled(sessions.sessions.count < 2)
+        }
+    }
+}
+
+/// Where the session came from: its machine, or saving a Quick Connect one.
+private struct SessionMachineActions: View {
+    let summary: SessionSummary
+    let sessions: SessionCoordinator
+    let ui: UIState
 
     var body: some View {
         if let machineID = summary.machineID {
@@ -207,6 +226,15 @@ private struct SessionActions: View {
             }
             .help("Save as Machine")
         }
+    }
+}
+
+private struct SessionConnectionActions: View {
+    let summary: SessionSummary
+    let sessions: SessionCoordinator
+    @Environment(ShortcutSettingsStore.self) private var shortcuts
+
+    var body: some View {
         if summary.state.hasLiveProcess {
             Button { sessions.disconnect(sessionID: summary.id) } label: {
                 Label("Disconnect", systemImage: "stop.circle")
@@ -216,6 +244,27 @@ private struct SessionActions: View {
             Button(action: reconnect) { Label("Reconnect", systemImage: "arrow.clockwise") }
                 .help("Reconnect" + shortcuts.hintSuffix(for: .reconnect))
         }
+    }
+
+    private func reconnect() {
+        Task {
+            do { try await sessions.reconnect(sessionID: summary.id) }
+            catch { sessions.present(error, title: "Couldn’t Reconnect") }
+        }
+    }
+}
+
+/// Remote desktop sessions only: display mode and the Screen Sharing handoff.
+private struct SessionDisplayActions: View {
+    let summary: SessionSummary
+    let sessions: SessionCoordinator
+
+    /// Whether the toolbar needs this group at all, so no spacer dangles.
+    static func applies(to summary: SessionSummary, in sessions: SessionCoordinator) -> Bool {
+        sessions.remoteDesktop(for: summary.id) != nil || screenSharingURL(for: summary) != nil
+    }
+
+    var body: some View {
         if sessions.remoteDesktop(for: summary.id) != nil {
             Picker("Display", selection: Binding(
                 get: { summary.displayMode ?? .fit },
@@ -226,30 +275,29 @@ private struct SessionActions: View {
             .pickerStyle(.menu)
             .help("Display")
         }
-        if let url = screenSharingURL {
+        if let url = Self.screenSharingURL(for: summary) {
             Button { NSWorkspace.shared.open(url) } label: {
                 Label("Open in Screen Sharing", systemImage: "macwindow.on.rectangle")
             }
             .help("Open in Apple’s Screen Sharing app")
         }
-        if includesClose {
-            Divider()
-            Button("Close") { sessions.requestClose(sessionID: summary.id) }
-            Button("Close Others") { sessions.requestCloseOthers(keeping: summary.id) }
-                .disabled(sessions.sessions.count < 2)
-        }
     }
 
     /// VNC sessions only, once an address has been resolved.
-    private var screenSharingURL: URL? {
+    private static func screenSharingURL(for summary: SessionSummary) -> URL? {
         guard summary.protocolKind == .vnc, let endpoint = summary.endpoint else { return nil }
         return endpoint.screenSharingURL(username: summary.username)
     }
+}
 
-    private func reconnect() {
-        Task {
-            do { try await sessions.reconnect(sessionID: summary.id) }
-            catch { sessions.present(error, title: "Couldn’t Reconnect") }
+/// A fixed gap between toolbar groups on macOS 26, where each group is its
+/// own glass pill; nothing before that.
+private struct ToolbarGroupGap: ToolbarContent {
+    var body: some ToolbarContent {
+        if #available(macOS 26, *) {
+            ToolbarSpacer(.fixed)
+        } else {
+            ToolbarItem { EmptyView() }
         }
     }
 }
@@ -295,7 +343,17 @@ private struct SessionContentView: View {
         .navigationSubtitle(subtitle)
         .toolbar {
             ToolbarItemGroup {
-                SessionActions(summary: summary, sessions: sessions, ui: ui)
+                SessionMachineActions(summary: summary, sessions: sessions, ui: ui)
+            }
+            ToolbarGroupGap()
+            ToolbarItemGroup {
+                SessionConnectionActions(summary: summary, sessions: sessions)
+            }
+            if SessionDisplayActions.applies(to: summary, in: sessions) {
+                ToolbarGroupGap()
+                ToolbarItemGroup {
+                    SessionDisplayActions(summary: summary, sessions: sessions)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -329,128 +387,119 @@ struct MachineOverviewView: View {
 
     private enum ProbeResult { case checking, reachable, unreachable }
     @State private var probes: [AddressID: ProbeResult] = [:]
+    @Environment(ShortcutSettingsStore.self) private var shortcuts
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-                .padding(.horizontal, 28)
-                .padding(.top, 22)
-                .padding(.bottom, 6)
-            Form {
-                let openSessions = sessions.sessions.filter { $0.machineID == machine.id }
-                if !openSessions.isEmpty {
-                    Section("Sessions") {
-                        ForEach(openSessions) { session in
-                            LabeledContent {
-                                Button("Show") { sessions.select(session.id) }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Circle()
-                                        .fill(sessionColor(for: session.state))
-                                        .frame(width: 8, height: 8)
-                                    Text(session.title)
-                                }
-                                .accessibilityElement(children: .combine)
-                                Text("\(session.profileName) · \(session.state.displayName)")
-                            }
+        Form {
+            if !machine.notes.isEmpty || !machine.tags.isEmpty {
+                Section {
+                    if !machine.notes.isEmpty {
+                        Text(machine.notes)
+                    }
+                    if !machine.tags.isEmpty {
+                        HStack(spacing: 6) {
+                            ForEach(machine.tags.sorted(), id: \.self) { Chip($0) }
                         }
-                    }
-                }
-
-                Section("Addresses") {
-                    let addresses = store.snapshot.addresses(for: machine.id)
-                    if addresses.isEmpty {
-                        Text("No addresses yet. Edit the machine to add one.")
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(addresses) { address in
-                        LabeledContent {
-                            reachability(for: address)
-                        } label: {
-                            Text(address.host)
-                            Text(addressDetail(for: address))
-                        }
-                    }
-                }
-
-                Section("Profiles") {
-                    let profiles = store.snapshot.orderedProfiles(for: machine)
-                    if profiles.isEmpty {
-                        Text("No profiles yet. Edit the machine to add one.")
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(profiles) { profile in
-                        LabeledContent {
-                            HStack {
-                                if case .vnc(let vnc) = profile, let url = screenSharingURL(for: vnc) {
-                                    Button { NSWorkspace.shared.open(url) } label: {
-                                        Image(systemName: "macwindow.on.rectangle")
-                                    }
-                                    .help("Open in Apple’s Screen Sharing app")
-                                    .accessibilityLabel("Open in Screen Sharing")
-                                }
-                                Button("Connect") { connect(profile.id) }
-                            }
-                        } label: {
-                            HStack(spacing: 7) {
-                                Image(systemName: profile.protocolKind.symbolName)
-                                    .foregroundStyle(.secondary)
-                                    .accessibilityHidden(true)
-                                Text(profile.name)
-                                if machine.defaultProfileID == profile.id {
-                                    Chip("Default")
-                                }
-                            }
-                            Text(profileDetail(for: profile))
-                        }
-                        .listRowBackground(
-                            ui.selectedProfileID == profile.id ? Color.accentColor.opacity(0.12) : nil)
                     }
                 }
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
+
+            let openSessions = sessions.sessions.filter { $0.machineID == machine.id }
+            if !openSessions.isEmpty {
+                Section("Sessions") {
+                    ForEach(openSessions) { session in
+                        LabeledContent {
+                            Button("Show") { sessions.select(session.id) }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(sessionColor(for: session.state))
+                                    .frame(width: 8, height: 8)
+                                Text(session.title)
+                            }
+                            .accessibilityElement(children: .combine)
+                            Text("\(session.profileName) · \(session.state.displayName)")
+                        }
+                    }
+                }
+            }
+
+            Section("Addresses") {
+                let addresses = store.snapshot.addresses(for: machine.id)
+                if addresses.isEmpty {
+                    Text("No addresses yet. Edit the machine to add one.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(addresses) { address in
+                    LabeledContent {
+                        reachability(for: address)
+                    } label: {
+                        Text(address.host)
+                        Text(addressDetail(for: address))
+                    }
+                }
+            }
+
+            Section("Profiles") {
+                let profiles = store.snapshot.orderedProfiles(for: machine)
+                if profiles.isEmpty {
+                    Text("No profiles yet. Edit the machine to add one.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(profiles) { profile in
+                    LabeledContent {
+                        HStack {
+                            if case .vnc(let vnc) = profile, let url = screenSharingURL(for: vnc) {
+                                Button { NSWorkspace.shared.open(url) } label: {
+                                    Image(systemName: "macwindow.on.rectangle")
+                                }
+                                .help("Open in Apple’s Screen Sharing app")
+                                .accessibilityLabel("Open in Screen Sharing")
+                            }
+                            Button("Connect") { connect(profile.id) }
+                        }
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: profile.protocolKind.symbolName)
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                            Text(profile.name)
+                            if machine.defaultProfileID == profile.id {
+                                Chip("Default")
+                            }
+                        }
+                        Text(profileDetail(for: profile))
+                    }
+                    .listRowBackground(
+                        ui.selectedProfileID == profile.id ? Color.accentColor.opacity(0.12) : nil)
+                }
+            }
         }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
         .frame(maxWidth: 760, alignment: .leading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle(machine.name)
         .navigationSubtitle("")
-        .onChange(of: machine.id) { probes = [:] }
-    }
-
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text(machine.name).font(.title.bold())
-                    Button {
-                        var updated = machine
-                        updated.isFavorite.toggle()
-                        Task { await store.save(.upsertMachine(updated)) }
-                    } label: {
-                        Image(systemName: machine.isFavorite ? "star.fill" : "star")
-                            .foregroundStyle(machine.isFavorite ? .yellow : .secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help(machine.isFavorite ? "Remove from Favorites" : "Add to Favorites")
-                    .accessibilityLabel(machine.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    var updated = machine
+                    updated.isFavorite.toggle()
+                    Task { await store.save(.upsertMachine(updated)) }
+                } label: {
+                    Label(machine.isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                          systemImage: machine.isFavorite ? "star.fill" : "star")
                 }
-                if !machine.notes.isEmpty {
-                    Text(machine.notes)
-                        .foregroundStyle(.secondary)
+                .tint(machine.isFavorite ? .yellow : nil)
+                .help(machine.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+                Button { ui.editor = .edit(machine.id) } label: {
+                    Label("Edit Machine", systemImage: "pencil")
                 }
-                if !machine.tags.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(machine.tags.sorted(), id: \.self) { Chip($0) }
-                    }
-                }
+                .help("Edit Machine" + shortcuts.hintSuffix(for: .editMachine))
             }
-            Spacer()
-            Button { ui.editor = .edit(machine.id) } label: {
-                Label("Edit", systemImage: "pencil")
-            }
-            .keyboardShortcut("e")
         }
+        .onChange(of: machine.id) { probes = [:] }
     }
 
     /// Label and network kind, without repeating one in the other.
