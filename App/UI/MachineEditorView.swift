@@ -27,7 +27,9 @@ struct MachineEditorView: View {
     private var hasChanges: Bool { draft != original }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            SheetTitle(draft.isNew ? "Add Machine" : "Edit Machine")
+            Divider()
             Form {
                 Section("Machine") {
                     TextField("Name", text: $draft.machine.name, prompt: Text("Machine name"))
@@ -86,7 +88,6 @@ struct MachineEditorView: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle(draft.isNew ? "Add Machine" : "Edit Machine")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: cancel)

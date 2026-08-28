@@ -13,7 +13,9 @@ struct QuickConnectView: View {
     let onConnect: (QuickConnectTarget) -> Void
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            SheetTitle("Quick Connect")
+            Divider()
             Form {
                 Section {
                     TextField("Target", text: $targetText, prompt: Text("user@host:port"))
@@ -30,7 +32,6 @@ struct QuickConnectView: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle("Quick Connect")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", role: .cancel) { dismiss() }
@@ -69,7 +70,9 @@ struct SaveQuickConnectView: View {
     let ui: UIState
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            SheetTitle("Save as Machine")
+            Divider()
             Form {
                 Section {
                     TextField("Name", text: $machineName, prompt: Text("Machine name"))
@@ -86,7 +89,6 @@ struct SaveQuickConnectView: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle("Save as Machine")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", role: .cancel) { dismiss() }

@@ -72,3 +72,21 @@ extension View {
         modifier(TopBar(isPresented: isPresented, bar: content))
     }
 }
+
+/// A sheet's title row, aligned with the grouped form below it. macOS sheets
+/// have no titlebar, and the header a NavigationStack would draw indents its
+/// title past the form's leading edge.
+struct SheetTitle: View {
+    let title: String
+
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        Text(title)
+            .font(.headline)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 30)
+            .frame(height: 44)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
