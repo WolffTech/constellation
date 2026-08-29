@@ -36,8 +36,8 @@ passphrases are stored in the macOS Keychain.
 
 Constellation requires macOS 15 or later on Apple silicon.
 
-1. Download the signed `.zip` from [GitHub Releases](https://github.com/WolffTech/constellation/releases) when one is available, or [build from source](#build-from-source).
-2. Unzip it and move **Constellation.app** to **Applications**.
+1. Download the signed `.dmg` from [GitHub Releases](https://github.com/WolffTech/constellation/releases) when one is available, or [build from source](#build-from-source).
+2. Open it and drag **Constellation** to **Applications**.
 3. Open Constellation from **Applications** and add your first machine.
 
 ### Updates
@@ -46,9 +46,9 @@ Constellation checks GitHub Releases for updates with
 [Sparkle](https://sparkle-project.org): use **Constellation → Check for
 Updates…**, or turn on automatic checks in **Settings → Updates**. Every
 0.x version is a beta; 1.0.0 will be the first stable release. In-app updating
-only works after the app has been moved to **Applications** (macOS runs apps
-launched from `~/Downloads` translocated, which Sparkle cannot update in
-place).
+only works after the app has been copied to **Applications** (macOS runs apps
+launched from the disk image or `~/Downloads` translocated, which Sparkle
+cannot update in place).
 
 ## Build from source
 
@@ -76,9 +76,10 @@ fork builds would otherwise try to update from this repository's feed.
 ## Releasing
 
 Push a tag such as `v0.1.0` to publish a release. The Release workflow
-builds, notarizes and staples the app, signs the zip for Sparkle, and attaches
-the zip, its checksum, the corresponding source and `appcast.xml` to the
-GitHub release. The app reads the appcast from the latest release, so every
+builds, notarizes and staples the app, packs it into a notarized disk image
+(`Scripts/build-dmg.sh`), signs the image for Sparkle, and attaches the image,
+its checksum, the corresponding source and `appcast.xml` to the GitHub
+release. The app reads the appcast from the latest release, so every
 tag is published as a full release, never a pre-release. The build number is
 the commit count on the tag, which is also what Sparkle compares.
 

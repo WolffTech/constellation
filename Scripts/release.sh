@@ -2,8 +2,10 @@
 # SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
 # SPDX-License-Identifier: GPL-3.0-only
 
-# Builds a distributable Constellation.app: Release archive signed with
-# Developer ID and the Hardened Runtime, notarized, stapled, and zipped.
+# Builds the distributable Constellation disk image: Release archive signed
+# with Developer ID and the Hardened Runtime, notarized and stapled, then
+# packed by Scripts/build-dmg.sh into a DMG that is itself signed, notarized
+# and stapled. The same DMG is the GitHub download and the Sparkle update.
 #
 #   Scripts/release.sh <version> [build-number]
 #
@@ -16,7 +18,8 @@
 #   NOTARY_KEY_FILE, NOTARY_KEY_ID, NOTARY_ISSUER_ID
 #                   App Store Connect API key; when all three are set they are
 #                   used instead of the keychain profile (CI has no profile).
-#   SKIP_NOTARIZE=1 stop after signing; useful to inspect the bundle offline.
+#   SKIP_NOTARIZE=1 sign the app and the DMG but submit nothing to Apple;
+#                   useful to inspect the bundle and the image offline.
 #
 # Output lands in build/release/<version>/. Nothing is uploaded except the
 # notarization submission to Apple.
@@ -42,7 +45,43 @@ OUT="$ROOT/build/release/$VERSION"
 ARCHIVE="$OUT/Constellation.xcarchive"
 EXPORT="$OUT/export"
 APP="$EXPORT/Constellation.app"
-ZIP="$OUT/Constellation-$VERSION.zip"
+DMG="$OUT/Constellation-$VERSION.dmg"
+
+# Submits a file to notarytool and prints Apple's log when it is not accepted.
+notarize() {
+  local submission submission_id
+  echo "Notarizing $(basename "$1") ($NOTARY_AUTH_DESCRIPTION)..."
+  submission="$(xcrun notarytool submit "$1" "${NOTARY_AUTH[@]}" --wait 2>&1)" || true
+  echo "$submission"
+  if [[ "$submission" != *"status: Accepted"* ]]; then
+    echo "Notarization was not accepted; fetching the log..." >&2
+    submission_id="$(sed -n 's/^ *id: //p' <<<"$submission" | head -1)"
+    if [[ -n "$submission_id" ]]; then
+      xcrun notarytool log "$submission_id" "${NOTARY_AUTH[@]}" >&2
+    fi
+    exit 1
+  fi
+}
+
+# The DMG is signed with the same Developer ID identity the export used.
+signing_identity() {
+  local identity
+  identity="$(security find-identity -v -p codesigning \
+    | sed -n 's/^ *[0-9]*) \([0-9A-F]\{40\}\) "Developer ID Application: .*(45QKSLQ5S4)"$/\1/p' | head -1)"
+  if [[ -z "$identity" ]]; then
+    echo "no Developer ID Application identity for team 45QKSLQ5S4 in the keychain" >&2
+    exit 1
+  fi
+  echo "$identity"
+}
+
+# Packs the stapled app into the styled image and signs it.
+build_dmg() {
+  Scripts/build-dmg.sh "$APP" "$DMG"
+  echo "Signing disk image..."
+  codesign --force --sign "$(signing_identity)" --timestamp "$DMG"
+  codesign --verify --verbose=2 "$DMG"
+}
 
 cd "$ROOT"
 if [[ ! -d Constellation.xcodeproj ]]; then
@@ -133,30 +172,30 @@ if [[ ! "$public_key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
 fi
 
 if [[ "${SKIP_NOTARIZE:-0}" == "1" ]]; then
-  echo "SKIP_NOTARIZE set; signed app at $APP"
+  build_dmg
+  echo "SKIP_NOTARIZE set; signed app at $APP, unnotarized image at $DMG"
   exit 0
 fi
 
-echo "Notarizing ($NOTARY_AUTH_DESCRIPTION)..."
+# The app is notarized and stapled before it goes into the image so a copy
+# dragged out of the DMG carries its own ticket; the DMG then gets its own
+# ticket so Gatekeeper accepts the download without a network round-trip.
 ditto -c -k --keepParent "$APP" "$OUT/notarize.zip"
-submission="$(xcrun notarytool submit "$OUT/notarize.zip" "${NOTARY_AUTH[@]}" --wait 2>&1)" || true
-echo "$submission"
+notarize "$OUT/notarize.zip"
 rm -f "$OUT/notarize.zip"
-if [[ "$submission" != *"status: Accepted"* ]]; then
-  echo "Notarization was not accepted; fetching the log..." >&2
-  submission_id="$(sed -n 's/^ *id: //p' <<<"$submission" | head -1)"
-  if [[ -n "$submission_id" ]]; then
-    xcrun notarytool log "$submission_id" "${NOTARY_AUTH[@]}" >&2
-  fi
-  exit 1
-fi
 
-echo "Stapling..."
+echo "Stapling app..."
 xcrun stapler staple "$APP"
 xcrun stapler validate "$APP"
 spctl --assess --type execute --verbose=2 "$APP"
 
-ditto -c -k --keepParent "$APP" "$ZIP"
-(cd "$OUT" && shasum -a 256 "$(basename "$ZIP")" > "$ZIP.sha256")
-echo "Release ready: $ZIP"
-cat "$ZIP.sha256"
+build_dmg
+notarize "$DMG"
+echo "Stapling disk image..."
+xcrun stapler staple "$DMG"
+xcrun stapler validate "$DMG"
+spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+
+(cd "$OUT" && shasum -a 256 "$(basename "$DMG")" > "$DMG.sha256")
+echo "Release ready: $DMG"
+cat "$DMG.sha256"
