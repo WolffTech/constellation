@@ -32,9 +32,10 @@ jobs:
           NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
           missing=0
-          for name in MACOS_CERT_P12 MACOS_CERT_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID; do
+          for name in MACOS_CERT_P12 MACOS_CERT_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID SPARKLE_ED_PRIVATE_KEY; do
             if [[ -z "${!name}" ]]; then
               echo "::error::missing repository secret: $name"
               missing=1
@@ -117,6 +118,36 @@ jobs:
       - name: Package corresponding source
         run: Scripts/package-source.sh "$APP_VERSION"
 
+      # The EdDSA signature covers the exact zip bytes, so this runs on the
+      # final signed, notarized, stapled archive, and that same file is the
+      # one uploaded below. The app's SUFeedURL is the appcast attached to the
+      # latest release, so every tag must publish as a full release.
+      - name: Generate Sparkle appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          SPARKLE_VERSION: 2.9.6
+          SPARKLE_SHA256: 52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192
+        run: |
+          curl --fail --location --silent --show-error \
+            --output "$RUNNER_TEMP/Sparkle.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          echo "$SPARKLE_SHA256  $RUNNER_TEMP/Sparkle.tar.xz" | shasum -a 256 --check
+          mkdir "$RUNNER_TEMP/sparkle-dist" "$RUNNER_TEMP/appcast-archives"
+          tar -xJf "$RUNNER_TEMP/Sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle-dist"
+          # generate_appcast writes state next to its archives; give it a
+          # copy so nothing touches the zip that gets uploaded.
+          cp "build/release/$APP_VERSION/Constellation-$APP_VERSION.zip" "$RUNNER_TEMP/appcast-archives/"
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | \
+            "$RUNNER_TEMP/sparkle-dist/bin/generate_appcast" \
+              --ed-key-file - \
+              --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/" \
+              --link "https://github.com/${GITHUB_REPOSITORY}" \
+              -o "build/release/$APP_VERSION/appcast.xml" \
+              "$RUNNER_TEMP/appcast-archives"
+          # generate_appcast only signs bundles whose Info.plist has SUPublicEDKey.
+          grep -q 'sparkle:edSignature=' "build/release/$APP_VERSION/appcast.xml"
+          cat "build/release/$APP_VERSION/appcast.xml"
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -124,12 +155,14 @@ jobs:
         run: |
           ZIP="build/release/$APP_VERSION/Constellation-$APP_VERSION.zip"
           SOURCE_ZIP="build/release/$APP_VERSION/Constellation-$APP_VERSION-source.zip"
+          APPCAST="build/release/$APP_VERSION/appcast.xml"
           # A tag created through the GitHub release UI already has a release;
           # attach the artifacts to it. A plain pushed tag gets a new release.
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" \
               "$ZIP" "$ZIP.sha256" \
               "$SOURCE_ZIP" "$SOURCE_ZIP.sha256" \
+              "$APPCAST" \
               --clobber
           else
             gh release create "$GITHUB_REF_NAME" \
@@ -137,7 +170,8 @@ jobs:
               --generate-notes \
               --verify-tag \
               "$ZIP" "$ZIP.sha256" \
-              "$SOURCE_ZIP" "$SOURCE_ZIP.sha256"
+              "$SOURCE_ZIP" "$SOURCE_ZIP.sha256" \
+              "$APPCAST"
           fi
 
       - name: Remove signing keychain

@@ -24,6 +24,10 @@ set -euo pipefail
 
 VERSION="${1:?usage: release.sh <version> [build-number]}"
 BUILD_NUMBER="${2:-$(git rev-list --count HEAD)}"
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "version must look like 1.2.3 (received: $VERSION)" >&2
+  exit 1
+fi
 NOTARY_PROFILE="${NOTARY_PROFILE:-constellation-notary}"
 if [[ -n "${NOTARY_KEY_FILE:-}" && -n "${NOTARY_KEY_ID:-}" && -n "${NOTARY_ISSUER_ID:-}" ]]; then
   NOTARY_AUTH=(--key "$NOTARY_KEY_FILE" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
@@ -100,6 +104,33 @@ for binary in "$APP/Contents/MacOS/Constellation" "$APP/Contents/MacOS/constella
     exit 1
   fi
 done
+
+# Sparkle: the export must have re-signed every nested piece with our team
+# (library validation and notarization both reject the upstream signature),
+# and the plist must name this repository's feed and a real ed25519 key
+# (44-character base64), not a placeholder.
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+if [[ ! -d "$SPARKLE" ]]; then
+  echo "Sparkle.framework is not embedded in $APP" >&2
+  exit 1
+fi
+for nested in "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "$SPARKLE/Versions/B/XPCServices/"*.xpc "$SPARKLE"; do
+  team="$(codesign --display --verbose=2 "$nested" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+  if [[ "$team" != "45QKSLQ5S4" ]]; then
+    echo "$nested is signed by team ${team:-none}, not 45QKSLQ5S4" >&2
+    exit 1
+  fi
+done
+feed_url="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$APP/Contents/Info.plist")"
+if [[ "$feed_url" != "https://github.com/WolffTech/constellation/"* ]]; then
+  echo "SUFeedURL does not point at this repository: $feed_url" >&2
+  exit 1
+fi
+public_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP/Contents/Info.plist")"
+if [[ ! "$public_key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+  echo "SUPublicEDKey is not an ed25519 public key: $public_key" >&2
+  exit 1
+fi
 
 if [[ "${SKIP_NOTARIZE:-0}" == "1" ]]; then
   echo "SKIP_NOTARIZE set; signed app at $APP"

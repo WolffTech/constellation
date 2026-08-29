@@ -22,11 +22,21 @@ machines in the app's own process:
 | OpenSSL (source build, linked statically into FreeRDPKit) | LTS release `3.5.8`, archive SHA-256 pinned in `Scripts/build-openssl.sh` | TLS and NLA for RDP | https://openssl-library.org/news/vulnerabilities/ |
 | RoyalVNCKit (Swift package) | revision `92d4427c` (tag 1.1.0) | VNC sessions | https://github.com/royalapplications/royalvnc/releases |
 | GRDB (Swift package) | exact `7.11.1` | SQLite storage | https://github.com/groue/GRDB.swift/releases |
+| Sparkle (prebuilt framework, Swift package) | exact `2.9.6` | in-app updates | https://github.com/sparkle-project/Sparkle/releases, https://github.com/sparkle-project/Sparkle/security |
 | OpenSSH | the system `/usr/bin/ssh` | SSH transport | macOS security updates |
 
 Passwords and passphrases are stored only in the login Keychain and are never
 written to arguments, environment, the database or logs. Certificate decisions
 for RDP live in `trust.sqlite`; SSH host keys are OpenSSH's own `known_hosts`.
+
+Updates are fetched from the appcast attached to the latest GitHub release and
+installed only when the archive's EdDSA signature verifies against the
+`SUPublicEDKey` baked into the app, and macOS additionally checks that the new
+bundle carries the same Developer ID team. The private key exists in two
+places: the release maintainer's login Keychain and the `SPARKLE_ED_PRIVATE_KEY`
+repository secret. A compromised key means rotating it (`generate_keys`),
+shipping a release with the new public key, and treating every earlier build
+as unable to update.
 
 ## Updating a dependency
 
@@ -39,8 +49,9 @@ for RDP live in `trust.sqlite`; SSH host keys are OpenSSH's own `known_hosts`.
    and GRDB, `ZIG_VERSION`/`ZIG_SHA256` in `Scripts/build-libghostty.sh`
    when Ghostty's `build.zig.zon` requires a newer Zig, and
    `OPENSSL_VERSION`/`OPENSSL_SHA256` in `Scripts/build-openssl.sh` for
-   OpenSSL. Refresh and commit each affected `Package.resolved` after a Swift
-   package change.
+   OpenSSL, and `project.yml` plus `SPARKLE_VERSION`/`SPARKLE_SHA256` in
+   `.github/workflows/release.yml` for Sparkle. Refresh and commit each
+   affected `Package.resolved` after a Swift package change.
 3. Rebuild the native kits: `Scripts/build-libghostty.sh`,
    `Scripts/build-freerdp.sh`. Both are reproducible from the scripts alone.
 4. Run the full test scheme, then the environment-gated live tests against a

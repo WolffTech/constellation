@@ -78,6 +78,15 @@ SQLite access for the machine library and the certificate trust store.
 - License: MIT
 - License text: [`grdb.txt`](App/Licenses/grdb.txt)
 
+## Sparkle
+
+In-app updates, embedded as the prebuilt framework the Sparkle project publishes.
+
+- Upstream: [https://github.com/sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle)
+- Version: 2.9.6
+- License: MIT; bundled components (bspatch, ed25519, SHA-1) under compatible permissive licenses
+- License text: [`sparkle.txt`](App/Licenses/sparkle.txt)
+
 ## FreeType
 
 Font rasterization inside libghostty.

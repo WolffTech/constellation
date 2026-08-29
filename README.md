@@ -40,6 +40,16 @@ Constellation requires macOS 15 or later on Apple silicon.
 2. Unzip it and move **Constellation.app** to **Applications**.
 3. Open Constellation from **Applications** and add your first machine.
 
+### Updates
+
+Constellation checks GitHub Releases for updates with
+[Sparkle](https://sparkle-project.org): use **Constellation → Check for
+Updates…**, or turn on automatic checks in **Settings → Updates**. Every
+0.x version is a beta; 1.0.0 will be the first stable release. In-app updating
+only works after the app has been moved to **Applications** (macOS runs apps
+launched from `~/Downloads` translocated, which Sparkle cannot update in
+place).
+
 ## Build from source
 
 Install Xcode 26 or later, then run:
@@ -57,6 +67,20 @@ open Constellation.xcodeproj
 
 The build scripts download the pinned Zig toolchain and OpenSSL release, then
 compile the pinned Ghostty and FreeRDP versions.
+
+If you fork this repository and distribute your own builds, replace
+`SUFeedURL` and `SUPublicEDKey` in `project.yml` with your own update feed and
+Sparkle signing key. The committed values belong to the official releases, so
+fork builds would otherwise try to update from this repository's feed.
+
+## Releasing
+
+Push a tag such as `v0.1.0` to publish a release. The Release workflow
+builds, notarizes and staples the app, signs the zip for Sparkle, and attaches
+the zip, its checksum, the corresponding source and `appcast.xml` to the
+GitHub release. The app reads the appcast from the latest release, so every
+tag is published as a full release, never a pre-release. The build number is
+the commit count on the tag, which is also what Sparkle compares.
 
 ## License
 

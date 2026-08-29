@@ -13,6 +13,11 @@ interface definitions, and build scripts used for that release. Xcode, Zig, and
 Apple system frameworks are standard build tools or system libraries and are
 not included. Private signing credentials are not required for a local build.
 
+The Sparkle update framework embedded in binary releases is a separate,
+MIT-licensed work consumed as the prebuilt framework published by the Sparkle
+project at the version pinned in `project.yml`; its source is available from
+<https://github.com/sparkle-project/Sparkle> at the matching tag.
+
 The current development source is available in the
 [Constellation repository](https://github.com/WolffTech/constellation).
 

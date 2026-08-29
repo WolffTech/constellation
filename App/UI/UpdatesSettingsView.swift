@@ -3,32 +3,32 @@
 
 import SwiftUI
 
-/// Placeholder until an updater (Sparkle is the plan) ships. Shows the
-/// installed version and where new builds are published.
 struct UpdatesSettingsView: View {
     static let releasesURL = URL(string: "https://github.com/WolffTech/constellation/releases")!
+
+    @Bindable var updates: UpdateController
 
     var body: some View {
         Form {
             Section {
-                LabeledContent("Version", value: Self.versionDescription)
+                LabeledContent("Version", value: "\(updates.version) (\(updates.build))")
+                Toggle("Check for updates automatically", isOn: $updates.automaticallyChecksForUpdates)
+                Toggle("Download updates automatically", isOn: $updates.automaticallyDownloadsUpdates)
+                    .disabled(!updates.automaticallyChecksForUpdates)
             } footer: {
-                Text("Constellation does not check for updates yet. Automatic updates are planned for a later release; until then, new versions are published on GitHub.")
+                Text("Updates are downloaded from GitHub Releases and verified before they are installed.")
             }
             Section {
                 HStack {
-                    Spacer()
                     Link("View Releases on GitHub", destination: Self.releasesURL)
+                    Spacer()
+                    Button("Check for Updates…") { updates.checkForUpdates() }
+                        .disabled(!updates.canCheckForUpdates)
                 }
             }
         }
         .formStyle(.grouped)
-    }
-
-    static var versionDescription: String {
-        let info = Bundle.main.infoDictionary ?? [:]
-        let version = info["CFBundleShortVersionString"] as? String ?? "–"
-        let build = info["CFBundleVersion"] as? String ?? "–"
-        return "\(version) (\(build))"
+        .disabled(!updates.isAvailable)
+        .onAppear { updates.refresh() }
     }
 }

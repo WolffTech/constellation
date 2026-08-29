@@ -27,6 +27,7 @@ final class CompositionRoot {
     let vncSettings: VNCSettingsStore
     let rdpSettings: RDPSettingsStore
     let sidebarExpansion: SidebarExpansionStore
+    let updates = UpdateController()
 
     private var runtime: GhosttyRuntime?
     private var askPass: AskPassService?

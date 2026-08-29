@@ -30,7 +30,7 @@ struct SettingsView: View {
             ShortcutSettingsView(shortcuts: root.shortcuts)
                 .frame(width: Self.tabSize.width, height: Self.tabSize.height)
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
-            UpdatesSettingsView()
+            UpdatesSettingsView(updates: root.updates)
                 .frame(width: Self.tabSize.width, height: Self.tabSize.height)
                 .tabItem { Label("Updates", systemImage: "arrow.down.circle") }
         }

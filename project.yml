@@ -28,6 +28,11 @@ settings:
 packages:
   ConstellationCore:
     path: Packages/ConstellationCore
+  # Prebuilt xcframework; Xcode embeds it and the developer-id export re-signs
+  # its nested code (Autoupdate, Updater.app, XPC services) with our team.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.9.6
   ConstellationTerminal:
     path: Packages/ConstellationTerminal
   ConstellationInfrastructure:
@@ -62,6 +67,7 @@ targets:
         product: ConstellationVNC
       - package: ConstellationRemoteDesktop
         product: ConstellationRDP
+      - package: Sparkle
     # ssh runs the helper as a separate process, so it ships beside the app binary.
     postBuildScripts:
       - name: Embed constellation-askpass
@@ -106,6 +112,13 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSHumanReadableCopyright: "© 2026 Wolff.Tech"
         LSApplicationCategoryType: public.app-category.developer-tools
+        # Sparkle. release.yml attaches appcast.xml to every GitHub release;
+        # every tag is a full release (no pre-releases) or the latest URL
+        # would skip it. The key pair was made with Sparkle's generate_keys
+        # (keychain account "constellation"); release.yml signs with the
+        # private half from the SPARKLE_ED_PRIVATE_KEY secret.
+        SUFeedURL: https://github.com/WolffTech/constellation/releases/latest/download/appcast.xml
+        SUPublicEDKey: 0shliaoaTRxwGoSI/xqVjxhTLuVSxa1a14gpXrcyfxM=
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: tech.wolff.Constellation

@@ -64,6 +64,14 @@
     "file": "grdb.txt"
   },
   {
+    "name": "Sparkle",
+    "version": "2.9.6",
+    "license": "MIT; bundled components (bspatch, ed25519, SHA-1) under compatible permissive licenses",
+    "url": "https://github.com/sparkle-project/Sparkle",
+    "summary": "In-app updates, embedded as the prebuilt framework the Sparkle project publishes.",
+    "file": "sparkle.txt"
+  },
+  {
     "name": "FreeType",
     "version": "2.13.2",
     "license": "FreeType License",

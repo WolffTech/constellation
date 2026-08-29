@@ -19,6 +19,10 @@ struct ConstellationApp: App {
         }
         .defaultSize(width: 1100, height: 700)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { root.updates.checkForUpdates() }
+                    .disabled(!root.updates.canCheckForUpdates)
+            }
             CommandGroup(replacing: .newItem) {
                 CommandButton(.newMachine, root: root)
                 CommandButton(.editMachine, root: root)
