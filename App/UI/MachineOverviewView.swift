@@ -33,6 +33,7 @@ struct WorkspaceDetailView: View {
                 systemImage: "server.rack",
                 description: Text(shortcuts.hint(for: .newMachine).map { "Choose a machine in the sidebar, or press \($0) to add one." }
                     ?? "Choose a machine in the sidebar, or add one from the File menu."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
