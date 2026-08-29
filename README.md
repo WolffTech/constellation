@@ -8,47 +8,37 @@
 <h1 align="center">Constellation</h1>
 
 <p align="center">
-  A native macOS workspace for SSH, RDP, and VNC sessions in one window.
+  SSH, RDP, and VNC sessions in one native macOS app.
 </p>
 
-Constellation saves your remote machines and opens their sessions as tabs. SSH
-uses [libghostty](https://github.com/ghostty-org/ghostty), RDP uses
-[FreeRDP](https://github.com/FreeRDP/FreeRDP), and VNC uses
-[RoyalVNCKit](https://github.com/royalapplications/royalvnc). Passwords and
-passphrases are stored in the macOS Keychain.
+Constellation saves your remote machines and opens each session in a tab. It uses [libghostty](https://github.com/ghostty-org/ghostty) for SSH, [FreeRDP](https://github.com/FreeRDP/FreeRDP) for RDP, and [RoyalVNCKit](https://github.com/royalapplications/royalvnc) for VNC.
 
 > [!NOTE]
-> Constellation does not create a VPN or relay traffic. Connect to your LAN,
-> VPN, or Tailscale network before starting a session.
+> Constellation does not create a VPN or relay traffic. Connect to your LAN, VPN, or Tailscale network before starting a session.
 
-## Features
+## What it does
 
-- Multiple addresses and connection profiles for each machine
-- SSH tabs with a Metal-rendered terminal, fonts, themes, and your existing
-  OpenSSH configuration, keys, and agent, optionally styled by your own
-  Ghostty configuration
-- RDP sessions with NLA, HiDPI rendering, shared clipboard text, and a trust
-  store for accepted certificates
-- VNC sessions in Constellation or Apple's Screen Sharing app
-- Keychain-backed credentials and a workspace that restores open tabs
+- Saves multiple addresses and connection profiles for each machine
+- Opens sessions in tabs and restores the tabs from your previous workspace
+- Runs SSH sessions in a Metal-rendered terminal that uses your existing OpenSSH configuration, keys, and agent
+- Supports custom terminal fonts, themes, and Ghostty configuration
+- Runs RDP sessions with NLA, HiDPI rendering, shared clipboard text, and a trust store for accepted certificates
+- Opens VNC sessions in Constellation or Apple's Screen Sharing app
+- Stores credentials in the macOS Keychain
 
-## Install
+## Installation
 
-Constellation requires macOS 15 or later on Apple silicon.
+Constellation requires an Apple silicon Mac running macOS 15 or later.
 
 1. Download the signed `.dmg` from [GitHub Releases](https://github.com/WolffTech/constellation/releases) when one is available, or [build from source](#build-from-source).
-2. Open it and drag **Constellation** to **Applications**.
-3. Open Constellation from **Applications** and add your first machine.
+2. Open the disk image and drag Constellation to `/Applications`.
+3. Launch Constellation from `/Applications` and add a machine.
 
 ### Updates
 
-Constellation checks GitHub Releases for updates with
-[Sparkle](https://sparkle-project.org): use **Constellation → Check for
-Updates…**, or turn on automatic checks in **Settings → Updates**. Every
-0.x version is a beta; 1.0.0 will be the first stable release. In-app updating
-only works after the app has been copied to **Applications** (macOS runs apps
-launched from the disk image or `~/Downloads` translocated, which Sparkle
-cannot update in place).
+Constellation uses [Sparkle](https://sparkle-project.org) to check GitHub Releases for updates. Choose **Constellation → Check for Updates…**, or enable automatic checks in **Settings → Updates**.
+
+In-app updates work only after you copy Constellation to `/Applications`. macOS translocates apps launched from a disk image or `~/Downloads`, so Sparkle cannot update them in place.
 
 ## Build from source
 
@@ -65,27 +55,10 @@ xcodegen generate
 open Constellation.xcodeproj
 ```
 
-The build scripts download the pinned Zig toolchain and OpenSSL release, then
-compile the pinned Ghostty and FreeRDP versions.
+The build scripts download the pinned Zig and OpenSSL versions, then compile the pinned Ghostty and FreeRDP versions.
 
-If you fork this repository and distribute your own builds, replace
-`SUFeedURL` and `SUPublicEDKey` in `project.yml` with your own update feed and
-Sparkle signing key. The committed values belong to the official releases, so
-fork builds would otherwise try to update from this repository's feed.
-
-## Releasing
-
-Push a tag such as `v0.1.0` to publish a release. The Release workflow
-builds, notarizes and staples the app, packs it into a notarized disk image
-(`Scripts/build-dmg.sh`), signs the image for Sparkle, and attaches the image,
-its checksum, the corresponding source and `appcast.xml` to the GitHub
-release. The app reads the appcast from the latest release, so every
-tag is published as a full release, never a pre-release. The build number is
-the commit count on the tag, which is also what Sparkle compares.
+Forks that distribute their own builds must replace `SUFeedURL` and `SUPublicEDKey` in `project.yml`. Otherwise, those builds will check Constellation's official update feed and trust its release signatures.
 
 ## License
 
-Constellation is free software licensed under [GPL-3.0-only](LICENSE).
-Third-party attributions are listed in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and details about the source
-archive included with each release are in [SOURCE.md](SOURCE.md).
+Constellation is free software licensed under [GPL-3.0-only](LICENSE). Third-party attributions are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and details about the source archive included with each release are in [SOURCE.md](SOURCE.md).
