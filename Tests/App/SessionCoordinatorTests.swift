@@ -36,6 +36,9 @@ struct SessionCoordinatorTests {
         #expect(coordinator.sessions.first(where: { $0.id == id })?.state.isConnecting == true)
         session.terminal.emit(.titleChanged("constellation-connected:\(session.exitStatusChannel.token)"))
         #expect(coordinator.sessions.first(where: { $0.id == id })?.state.isConnected == true)
+        session.terminal.emit(.titleChanged("~/Developer/constellation"))
+        #expect(coordinator.sessions.first(where: { $0.id == id })?.title == "~/Developer/constellation")
+        #expect(coordinator.sessions.first(where: { $0.id == id })?.tabTitle == "box")
         #expect(coordinator.openSessionCount(forMachine: machine.id) == 1)
         #expect(coordinator.openSessionCount(forProfile: profile.id) == 1)
         #expect(coordinator.openSessionCount(forProfile: ProfileID()) == 0)
@@ -107,6 +110,7 @@ struct SessionCoordinatorTests {
         #expect(coordinator.terminal(for: id) === terminal)
         terminal.emit(.titleChanged("~/Developer"))
         #expect(coordinator.sessions.first?.title == "~/Developer")
+        #expect(coordinator.sessions.first?.tabTitle == "This Mac")
 
         try await coordinator.persistWorkspace()
         let snapshot = try await library.snapshot()
@@ -184,6 +188,53 @@ struct SessionCoordinatorTests {
         #expect(coordinator.selectedSessionID == one)
         coordinator.move(sessionID: three, before: one)
         #expect(coordinator.sessions.map(\.id) == [three, one, two])
+
+        coordinator.reorderSessions([two, three, one])
+        #expect(coordinator.sessions.map(\.id) == [two, three, one])
+
+        coordinator.reorderSessions([one, two])
+        #expect(coordinator.sessions.map(\.id) == [two, three, one])
+    }
+
+    @Test func backgroundTerminalBellNeedsAttentionUntilSelected() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let localDriver = StubLocalTerminalDriver()
+        let coordinator = SessionCoordinator(
+            library: library, prober: StubProber(), driver: StubSSHDriver(), localDriver: localDriver)
+        let first = coordinator.openLocalTerminal()
+        let firstTerminal = try #require(localDriver.terminals.last)
+        let second = coordinator.openLocalTerminal()
+
+        #expect(coordinator.selectedSessionID == second)
+        firstTerminal.emit(.bell)
+        #expect(coordinator.sessions.first(where: { $0.id == first })?.needsAttention == true)
+        #expect(coordinator.sessions.first(where: { $0.id == first })?.tabStatus == .attention)
+
+        coordinator.select(first)
+        #expect(coordinator.sessions.first(where: { $0.id == first })?.needsAttention == false)
+        #expect(coordinator.sessions.first(where: { $0.id == first })?.tabStatus == .running)
+
+        firstTerminal.emit(.bell)
+        #expect(coordinator.sessions.first(where: { $0.id == first })?.needsAttention == false)
+    }
+
+    @Test func nativeTabStatusTracksSessionLifecycle() {
+        var summary = SessionSummary(
+            id: SessionID(),
+            target: .local,
+            title: "This Mac",
+            machineName: "This Mac",
+            profileName: "Terminal",
+            state: .connecting(startedAt: .now),
+            kind: .localTerminal)
+
+        #expect(summary.tabStatus == .connecting)
+        summary.state = .running(startedAt: .now)
+        #expect(summary.tabStatus == .running)
+        summary.needsAttention = true
+        #expect(summary.tabStatus == .attention)
+        summary.state = .failed(.localShellExited(1))
+        #expect(summary.tabStatus == .failed)
     }
 
     @Test func closingOthersAsksFirstWhenAnotherSessionIsLive() async throws {

@@ -29,6 +29,7 @@ final class CompositionRoot {
     let rdpSettings: RDPSettingsStore
     let sidebarExpansion: SidebarExpansionStore
     let updates = UpdateController()
+    @ObservationIgnored let sessionWindows = SessionWindowManager()
 
     private var runtime: GhosttyRuntime?
     private var askPass: AskPassService?
@@ -72,6 +73,7 @@ final class CompositionRoot {
         } catch {
             startupError = error.localizedDescription
         }
+        sessionWindows.root = self
         palette.root = self
     }
 

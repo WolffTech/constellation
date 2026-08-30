@@ -6,11 +6,28 @@ import SwiftUI
 
 struct ContentView: View {
     let root: CompositionRoot
+    var sessionID: SessionID?
+    var managesSessionWindows: Bool
+
+    init(root: CompositionRoot, sessionID: SessionID? = nil, managesSessionWindows: Bool = true) {
+        self.root = root
+        self.sessionID = sessionID
+        self.managesSessionWindows = managesSessionWindows
+    }
 
     var body: some View {
         if let store = root.store, let sessions = root.sessions, let trustedCertificates = root.trustedCertificates {
             MainSplitView(store: store, sessions: sessions, ui: root.ui, expansion: root.sidebarExpansion,
-                          trustedCertificates: trustedCertificates, generalSettings: root.generalSettings)
+                          trustedCertificates: trustedCertificates, generalSettings: root.generalSettings,
+                          sessionID: sessionID, loadsWorkspace: managesSessionWindows)
+                .background {
+                    if managesSessionWindows {
+                        SessionWindowBridge(
+                            root: root,
+                            sessions: sessions.sessions,
+                            selectedSessionID: sessions.selectedSessionID)
+                    }
+                }
         } else {
             ContentUnavailableView(
                 "Constellation could not start",
@@ -27,6 +44,8 @@ struct MainSplitView: View {
     let expansion: SidebarExpansionStore
     let trustedCertificates: TrustedCertificatesModel
     let generalSettings: GeneralSettingsStore
+    let sessionID: SessionID?
+    let loadsWorkspace: Bool
 
     @State private var searchText = ""
     @State private var pendingDelete: Machine?
@@ -91,9 +110,10 @@ struct MainSplitView: View {
                            searchText: $searchText) { pendingDelete = $0 }
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
         } detail: {
-            WorkspaceDetailView(store: store, sessions: sessions, ui: ui)
+            WorkspaceDetailView(store: store, sessions: sessions, ui: ui, sessionID: sessionID)
         }
         .task {
+            guard loadsWorkspace else { return }
             await store.reload()
             sessions.restoreWorkspace(from: store.snapshot)
             if ui.localSelection == nil && ui.selectedMachineID == nil && sessions.selectedSessionID == nil {
@@ -173,7 +193,15 @@ struct MainSplitView: View {
     }
 
     private var closePresented: Binding<Bool> {
-        Binding(get: { sessions.pendingClose != nil }, set: { if !$0 { sessions.pendingClose = nil } })
+        Binding(get: { ownsPendingClose }, set: { if !$0 { sessions.pendingClose = nil } })
+    }
+
+    private var ownsPendingClose: Bool {
+        switch sessions.pendingClose {
+        case .session(let id): id == sessionID
+        case .others(let keeping): keeping == sessionID
+        case nil: false
+        }
     }
 
     private var closeAlertTitle: String {

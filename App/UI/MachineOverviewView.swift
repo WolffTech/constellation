@@ -11,19 +11,18 @@ struct WorkspaceDetailView: View {
     let store: MachineStore
     let sessions: SessionCoordinator
     let ui: UIState
+    let sessionID: SessionID?
     @Environment(ShortcutSettingsStore.self) private var shortcuts
 
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .topBar(isPresented: !sessions.sessions.isEmpty) {
-                SessionTabBar(sessions: sessions, ui: ui)
-            }
     }
 
     @ViewBuilder
     private var content: some View {
-        if let session = sessions.selectedSession {
+        if let sessionID,
+           let session = sessions.sessions.first(where: { $0.id == sessionID }) {
             SessionContentView(summary: session, sessions: sessions, ui: ui)
         } else if ui.localSelection != nil {
             LocalMachineOverviewView(sessions: sessions)
@@ -63,173 +62,6 @@ private struct LocalMachineOverviewView: View {
                 }
                 .help("Open Terminal" + shortcuts.hintSuffix(for: .connectDefaultProfile))
             }
-        }
-    }
-}
-
-private struct SessionTabBar: View {
-    let sessions: SessionCoordinator
-    let ui: UIState
-    @Environment(ShortcutSettingsStore.self) private var shortcuts
-
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal) {
-                SessionTabRow(sessions: sessions, ui: ui)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-            }
-            .frame(height: 38)
-            .scrollIndicators(.hidden)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Sessions")
-            .onChange(of: sessions.selectedSessionID, initial: true) { _, id in
-                if let id { proxy.scrollTo(id) }
-            }
-        }
-    }
-}
-
-/// The tabs and the Quick Connect button. On macOS 26 the selected tab is a
-/// glass capsule, so the row is a glass container for the morph between tabs.
-private struct SessionTabRow: View {
-    let sessions: SessionCoordinator
-    let ui: UIState
-    @Environment(CompositionRoot.self) private var root
-    @Environment(ShortcutSettingsStore.self) private var shortcuts
-
-    var body: some View {
-        if #available(macOS 26, *) {
-            GlassEffectContainer(spacing: 4) { tabs }
-        } else {
-            tabs
-        }
-    }
-
-    private var tabs: some View {
-        HStack(spacing: 4) {
-            ForEach(sessions.sessions) { session in
-                SessionTab(session: session, sessions: sessions, ui: ui)
-                    .id(session.id)
-            }
-            Button { root.perform(.quickConnect) } label: { Image(systemName: "plus") }
-                .buttonStyle(.borderless)
-                .padding(.horizontal, 8)
-                .help("Quick Connect" + shortcuts.hintSuffix(for: .quickConnect))
-                .accessibilityLabel("Quick Connect")
-        }
-    }
-}
-
-private struct SessionTab: View {
-    let session: SessionSummary
-    let sessions: SessionCoordinator
-    let ui: UIState
-    @State private var hovering = false
-
-    private var isSelected: Bool { session.id == sessions.selectedSessionID }
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(color(for: session.state))
-                .frame(width: 7, height: 7)
-            Text(session.title)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Button {
-                sessions.requestClose(sessionID: session.id)
-            } label: {
-                Image(systemName: "xmark").font(.caption2)
-            }
-            .buttonStyle(.borderless)
-            .help("Close Session")
-            .accessibilityLabel("Close \(session.title)")
-            .opacity(hovering || isSelected ? 1 : 0)
-            .accessibilityHidden(!(hovering || isSelected))
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .frame(maxWidth: 220)
-        .modifier(SessionTabSurface(isSelected: isSelected, hovering: hovering))
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .onTapGesture { sessions.select(session.id) }
-        .help(helpText)
-        .contextMenu { SessionActions(summary: session, sessions: sessions, ui: ui, includesClose: true) }
-        .draggable(session.id.description)
-        .dropDestination(for: String.self) { items, _ in
-            guard let value = items.first, let source = SessionID(uuidString: value) else { return false }
-            sessions.move(sessionID: source, before: session.id)
-            return true
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(session.title), \(session.state.displayName)")
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction { sessions.select(session.id) }
-    }
-
-    private var helpText: String {
-        var parts = [session.machineName ?? session.title, session.profileName, session.state.displayName]
-        if case .connected(let facts) = session.state { parts.append("\(facts.host):\(facts.port)") }
-        return parts.joined(separator: " · ")
-    }
-
-    private func color(for state: SessionState) -> Color {
-        switch state {
-        case .connected, .running: .green
-        case .connecting, .awaitingUserInput, .disconnecting: .orange
-        case .failed: .red
-        case .disconnected: .secondary
-        }
-    }
-}
-
-/// Selected: a glass capsule on macOS 26, an accent-tinted rectangle before.
-/// Hovered: a faint fill. Otherwise nothing.
-private struct SessionTabSurface: ViewModifier {
-    let isSelected: Bool
-    let hovering: Bool
-
-    func body(content: Content) -> some View {
-        if #available(macOS 26, *) {
-            if isSelected {
-                content.glassEffect(.regular.interactive(), in: .capsule)
-            } else {
-                content.background(hovering ? Color.primary.opacity(0.05) : .clear, in: .capsule)
-            }
-        } else {
-            content
-                .background(
-                    isSelected ? Color.accentColor.opacity(0.16) : hovering ? Color.primary.opacity(0.05) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 6))
-                .overlay {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
-                    }
-                }
-        }
-    }
-}
-
-/// Every action a session offers, for the tab context menu. The toolbar
-/// shows the same groups separated by spacers.
-private struct SessionActions: View {
-    let summary: SessionSummary
-    let sessions: SessionCoordinator
-    let ui: UIState
-    var includesClose = false
-
-    var body: some View {
-        SessionMachineActions(summary: summary, sessions: sessions, ui: ui)
-        SessionConnectionActions(summary: summary, sessions: sessions)
-        SessionDisplayActions(summary: summary, sessions: sessions)
-        if includesClose {
-            Divider()
-            Button("Close") { sessions.requestClose(sessionID: summary.id) }
-            Button("Close Others") { sessions.requestCloseOthers(keeping: summary.id) }
-                .disabled(sessions.sessions.count < 2)
         }
     }
 }
@@ -370,7 +202,7 @@ private struct SessionContentView: View {
                 }
             }
         }
-        .navigationTitle(summary.title)
+        .navigationTitle(summary.tabTitle)
         .navigationSubtitle(subtitle)
         .toolbar {
             ToolbarItemGroup {

@@ -130,6 +130,8 @@ struct SessionSummary: Identifiable, Equatable, Sendable {
     /// Remote desktop sessions only. `nil` until a session starts (the driver
     /// picks the default) or the user chooses one; a choice outlives reconnects.
     var displayMode: RemoteDesktopDisplayMode?
+    /// A bell from a background terminal stays visible until the tab is selected.
+    var needsAttention = false
 
     var machineID: MachineID? {
         guard case .saved(let machineID, _) = target else { return nil }
@@ -139,6 +141,19 @@ struct SessionSummary: Identifiable, Equatable, Sendable {
     var profileID: ProfileID? {
         guard case .saved(_, let profileID) = target else { return nil }
         return profileID
+    }
+
+    /// A stable connection label. Terminal titles may change to the current
+    /// directory, but a tab should continue to identify its machine.
+    var tabTitle: String {
+        switch target {
+        case .local:
+            "This Mac"
+        case .saved:
+            machineName ?? title
+        case .quick(let target):
+            target.displayName
+        }
     }
 
     /// Known once the profile was loaded; Quick Connect is always SSH.

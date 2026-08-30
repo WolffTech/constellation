@@ -201,7 +201,10 @@ final class SessionCoordinator {
         }
         handles.removeValue(forKey: sessionID)?.close()
         pendingConnectionFacts.removeValue(forKey: sessionID)
-        update(sessionID) { $0.state = .connecting(startedAt: .now) }
+        update(sessionID) {
+            $0.state = .connecting(startedAt: .now)
+            $0.needsAttention = false
+        }
         await connect(sessionID, snapshot: nil)
     }
 
@@ -293,6 +296,10 @@ final class SessionCoordinator {
 
     func select(_ sessionID: SessionID?) {
         guard sessionID == nil || sessions.contains(where: { $0.id == sessionID }) else { return }
+        if let sessionID {
+            update(sessionID) { $0.needsAttention = false }
+        }
+        guard selectedSessionID != sessionID else { return }
         selectedSessionID = sessionID
         scheduleWorkspaceSave()
     }
@@ -320,6 +327,17 @@ final class SessionCoordinator {
         let session = sessions.remove(at: source)
         let adjustedDestination = source < destination ? destination - 1 : destination
         sessions.insert(session, at: adjustedDestination)
+        scheduleWorkspaceSave()
+    }
+
+    /// Accepts the order reported by AppKit after the user drags native tabs.
+    func reorderSessions(_ orderedIDs: [SessionID]) {
+        let currentIDs = sessions.map(\.id)
+        guard orderedIDs != currentIDs,
+              orderedIDs.count == currentIDs.count,
+              Set(orderedIDs) == Set(currentIDs) else { return }
+        let summaries = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        sessions = orderedIDs.compactMap { summaries[$0] }
         scheduleWorkspaceSave()
     }
 
@@ -643,7 +661,7 @@ final class SessionCoordinator {
         case .closeRequested(let processAlive):
             handleCloseRequest(processAlive: processAlive, for: sessionID)
         case .bell:
-            NSSound.beep()
+            handleBell(for: sessionID)
         case .rendererHealthChanged(let healthy):
             handleRendererHealth(healthy)
         }
@@ -673,7 +691,7 @@ final class SessionCoordinator {
         case .closeRequested(let processAlive):
             handleCloseRequest(processAlive: processAlive, for: sessionID)
         case .bell:
-            NSSound.beep()
+            handleBell(for: sessionID)
         case .rendererHealthChanged(let healthy):
             handleRendererHealth(healthy)
         }
@@ -685,6 +703,13 @@ final class SessionCoordinator {
         } else {
             close(sessionID: sessionID)
         }
+    }
+
+    private func handleBell(for sessionID: SessionID) {
+        if sessionID != selectedSessionID {
+            update(sessionID) { $0.needsAttention = true }
+        }
+        NSSound.beep()
     }
 
     private func handleRendererHealth(_ healthy: Bool) {
