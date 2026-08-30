@@ -10,6 +10,20 @@ import Testing
 @testable import Constellation
 
 @MainActor
+struct GeneralSettingsTests {
+    @Test func generalSettingsShowTheLocalMachineByDefaultAndPersistChanges() throws {
+        let suiteName = "GeneralSettingsTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = GeneralSettingsStore(defaults: defaults)
+        #expect(settings.value.showsLocalMachine)
+        settings.update { $0.showsLocalMachine = false }
+        #expect(!GeneralSettingsStore(defaults: defaults).value.showsLocalMachine)
+    }
+}
+
+@MainActor
 struct RemoteDesktopSettingsTests {
     @Test func settingsPersistAndResetToDefaults() throws {
         let suiteName = "RemoteDesktopSettingsTests-\(UUID().uuidString)"

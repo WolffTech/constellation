@@ -10,7 +10,7 @@ struct ContentView: View {
     var body: some View {
         if let store = root.store, let sessions = root.sessions, let trustedCertificates = root.trustedCertificates {
             MainSplitView(store: store, sessions: sessions, ui: root.ui, expansion: root.sidebarExpansion,
-                          trustedCertificates: trustedCertificates)
+                          trustedCertificates: trustedCertificates, generalSettings: root.generalSettings)
         } else {
             ContentUnavailableView(
                 "Constellation could not start",
@@ -26,6 +26,7 @@ struct MainSplitView: View {
     let ui: UIState
     let expansion: SidebarExpansionStore
     let trustedCertificates: TrustedCertificatesModel
+    let generalSettings: GeneralSettingsStore
 
     @State private var searchText = ""
     @State private var pendingDelete: Machine?
@@ -86,7 +87,8 @@ struct MainSplitView: View {
     private var splitView: some View {
         NavigationSplitView {
             MachineSidebar(store: store, sessions: sessions, ui: ui, expansion: expansion,
-                           trustedCertificates: trustedCertificates, searchText: $searchText) { pendingDelete = $0 }
+                           trustedCertificates: trustedCertificates, generalSettings: generalSettings,
+                           searchText: $searchText) { pendingDelete = $0 }
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
         } detail: {
             WorkspaceDetailView(store: store, sessions: sessions, ui: ui)
@@ -97,17 +99,22 @@ struct MainSplitView: View {
             if ui.localSelection == nil && ui.selectedMachineID == nil && sessions.selectedSessionID == nil {
                 if let machine = store.snapshot.machines.first(where: \.isFavorite) ?? store.snapshot.machines.first {
                     ui.selectedMachineID = machine.id
-                } else {
+                } else if generalSettings.value.showsLocalMachine {
                     ui.localSelection = .machine
                 }
             }
         }
         // The sidebar highlight follows whichever session is showing, however it was selected.
         .onChange(of: sessions.selectedSessionID) { _, id in
-            guard let id, let session = sessions.sessions.first(where: { $0.id == id }) else { return }
+            guard let id, let session = sessions.sessions.first(where: { $0.id == id }) else {
+                if !generalSettings.value.showsLocalMachine, ui.selectedMachineID == nil {
+                    selectFallbackMachine()
+                }
+                return
+            }
             switch session.target {
             case .local:
-                ui.localSelection = .terminal
+                ui.localSelection = generalSettings.value.showsLocalMachine ? .terminal : nil
                 ui.selectedMachineID = nil
                 ui.selectedProfileID = nil
             case .saved:
@@ -133,6 +140,20 @@ struct MainSplitView: View {
                   case .quick(let target) = session.target else { return }
             saveQuickConnectName = target.host
         }
+        .onChange(of: generalSettings.value.showsLocalMachine) { _, showsLocalMachine in
+            if showsLocalMachine {
+                if sessions.selectedSession?.target == .local { ui.localSelection = .terminal }
+            } else if ui.localSelection != nil {
+                ui.localSelection = nil
+                if sessions.selectedSessionID == nil { selectFallbackMachine() }
+            }
+        }
+    }
+
+    private func selectFallbackMachine() {
+        ui.selectedMachineID = store.snapshot.machines.first(where: \.isFavorite)?.id
+            ?? store.snapshot.machines.first?.id
+        ui.selectedProfileID = nil
     }
 
     private var saveQuickConnectPresented: Binding<Bool> {

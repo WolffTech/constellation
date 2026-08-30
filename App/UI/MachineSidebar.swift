@@ -18,6 +18,7 @@ struct MachineSidebar: View {
     let ui: UIState
     let expansion: SidebarExpansionStore
     let trustedCertificates: TrustedCertificatesModel
+    let generalSettings: GeneralSettingsStore
     @Environment(ShortcutSettingsStore.self) private var shortcuts
     @Binding var searchText: String
     let onDelete: (Machine) -> Void
@@ -61,7 +62,14 @@ struct MachineSidebar: View {
         }
         .overlay {
             if !localMatchesSearch && filtered.isEmpty {
-                ContentUnavailableView.search(text: searchText)
+                if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                    ContentUnavailableView(
+                        "No Machines",
+                        systemImage: "server.rack",
+                        description: Text("Add a machine from the File menu."))
+                } else {
+                    ContentUnavailableView.search(text: searchText)
+                }
             }
         }
     }
@@ -116,6 +124,7 @@ struct MachineSidebar: View {
     }
 
     private var localMatchesSearch: Bool {
+        guard generalSettings.value.showsLocalMachine else { return false }
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
         return query.isEmpty || ["this mac", "local", "terminal", computerName.lowercased()].contains {
             $0.contains(query)

@@ -22,6 +22,7 @@ final class CompositionRoot {
     let ui = UIState()
     let palette = CommandPaletteController()
     let quickConnectHistory: QuickConnectHistory
+    let generalSettings: GeneralSettingsStore
     let terminalSettings: TerminalSettingsStore
     let shortcuts: ShortcutSettingsStore
     let vncSettings: VNCSettingsStore
@@ -33,6 +34,7 @@ final class CompositionRoot {
     private var askPass: AskPassService?
 
     init(defaults: UserDefaults = .standard) {
+        generalSettings = GeneralSettingsStore(defaults: defaults)
         terminalSettings = TerminalSettingsStore(defaults: defaults)
         shortcuts = ShortcutSettingsStore(defaults: defaults)
         vncSettings = VNCSettingsStore(defaults: defaults)
@@ -107,7 +109,7 @@ final class CompositionRoot {
         case .editMachine:
             ui.selectedMachineID != nil
         case .connectDefaultProfile:
-            ui.selectedMachineID != nil || ui.localSelection != nil
+            ui.selectedMachineID != nil || ui.localSelection != nil || sessions?.selectedSession?.target == .local
         case .closeSession, .findInSession:
             sessions?.selectedSessionID != nil
         case .closeOtherSessions:
@@ -161,7 +163,7 @@ final class CompositionRoot {
     /// or machine's default profile.
     func openNewSession() {
         guard let sessions else { return }
-        if ui.localSelection != nil {
+        if ui.localSelection != nil || sessions.selectedSession?.target == .local {
             sessions.openLocalTerminal()
             return
         }
