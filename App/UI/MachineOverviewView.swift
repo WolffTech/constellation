@@ -25,6 +25,8 @@ struct WorkspaceDetailView: View {
     private var content: some View {
         if let session = sessions.selectedSession {
             SessionContentView(summary: session, sessions: sessions, ui: ui)
+        } else if ui.localSelection != nil {
+            LocalMachineOverviewView(sessions: sessions)
         } else if let id = ui.selectedMachineID, let machine = store.snapshot.machine(id) {
             MachineOverviewView(machine: machine, store: store, sessions: sessions, ui: ui)
         } else {
@@ -34,6 +36,33 @@ struct WorkspaceDetailView: View {
                 description: Text(shortcuts.hint(for: .newMachine).map { "Choose a machine in the sidebar, or press \($0) to add one." }
                     ?? "Choose a machine in the sidebar, or add one from the File menu."))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+private struct LocalMachineOverviewView: View {
+    let sessions: SessionCoordinator
+    @Environment(ShortcutSettingsStore.self) private var shortcuts
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("This Mac", systemImage: "desktopcomputer")
+        } description: {
+            Text(ProcessInfo.processInfo.hostName)
+        } actions: {
+            Button("Open Terminal") { sessions.openLocalTerminal() }
+                .keyboardShortcut(.defaultAction)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle("This Mac")
+        .navigationSubtitle("Local")
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { sessions.openLocalTerminal() } label: {
+                    Label("Open Terminal", systemImage: "terminal")
+                }
+                .help("Open Terminal" + shortcuts.hintSuffix(for: .connectDefaultProfile))
+            }
         }
     }
 }
@@ -148,7 +177,7 @@ private struct SessionTab: View {
 
     private func color(for state: SessionState) -> Color {
         switch state {
-        case .connected: .green
+        case .connected, .running: .green
         case .connecting, .awaitingUserInput, .disconnecting: .orange
         case .failed: .red
         case .disconnected: .secondary
@@ -287,7 +316,7 @@ private struct SessionDisplayActions: View {
 
     /// VNC sessions only, once an address has been resolved.
     private static func screenSharingURL(for summary: SessionSummary) -> URL? {
-        guard summary.protocolKind == .vnc, let endpoint = summary.endpoint else { return nil }
+        guard summary.kind.connectionProtocol == .vnc, let endpoint = summary.endpoint else { return nil }
         return endpoint.screenSharingURL(username: summary.username)
     }
 }
@@ -369,7 +398,7 @@ private struct SessionContentView: View {
     }
 
     private var statusIcon: String {
-        if case .failed = summary.state { "exclamationmark.triangle" } else { summary.protocolKind.symbolName }
+        if case .failed = summary.state { "exclamationmark.triangle" } else { summary.kind.symbolName }
     }
 
     private func reconnect() {
@@ -593,7 +622,7 @@ struct MachineOverviewView: View {
 
     private func sessionColor(for state: SessionState) -> Color {
         switch state {
-        case .connected: .green
+        case .connected, .running: .green
         case .connecting, .awaitingUserInput, .disconnecting: .orange
         case .failed: .red
         case .disconnected: .secondary

@@ -99,6 +99,44 @@ struct GRDBUpgradeTests {
         #expect(try await library.snapshot().workspaceTabs == [tab])
     }
 
+    @Test func upgradesSavedWorkspaceTabsFromSchemaV2() async throws {
+        let path = temporaryPath("library.sqlite")
+        let machine = Machine(name: "alpha")
+        let profile = SSHProfile(machineID: machine.id)
+        let tab = WorkspaceTab(
+            id: SessionID(), machineID: machine.id, profileID: profile.id,
+            title: "alpha", position: 0, isSelected: true)
+
+        do {
+            try FileManager.default.createDirectory(
+                at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true)
+            let v2 = try DatabaseQueue(path: path)
+            try await GRDBMachineLibrary.migrator.migrate(v2, upTo: "v2-workspace-tabs")
+            let json = String(decoding: try JSONEncoder().encode(ConnectionProfile.ssh(profile)), as: UTF8.self)
+            try await v2.write { db in
+                try db.execute(
+                    sql: "INSERT INTO machines (id, name, notes, is_favorite) VALUES (?, ?, '', 0)",
+                    arguments: [machine.id.description, machine.name])
+                try db.execute(sql: """
+                    INSERT INTO connection_profiles
+                        (id, machine_id, protocol, name, settings_version, settings_json)
+                    VALUES (?, ?, 'ssh', 'SSH', 1, ?)
+                    """, arguments: [profile.id.description, machine.id.description, json])
+                try db.execute(sql: """
+                    INSERT INTO workspace_tabs (id, machine_id, profile_id, title, position, is_selected)
+                    VALUES (?, ?, ?, ?, 0, 1)
+                    """, arguments: [tab.id.description, machine.id.description, profile.id.description, tab.title])
+            }
+        }
+
+        let library = try GRDBMachineLibrary(path: path)
+        #expect(try await library.snapshot().workspaceTabs == [tab])
+
+        let local = WorkspaceTab(id: SessionID(), target: .local, title: "This Mac", position: 1)
+        try await library.save(.replaceWorkspace([tab, local]))
+        #expect(try await library.snapshot().workspaceTabs == [tab, local])
+    }
+
     @Test func refusesAProfileWrittenByANewerVersion() async throws {
         let library = try GRDBMachineLibrary.inMemory()
         let machine = Machine(name: "future", notes: "", tags: [], isFavorite: false)

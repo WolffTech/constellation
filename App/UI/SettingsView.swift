@@ -13,6 +13,9 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
+            GeneralSettingsView(settings: root.generalSettings)
+                .frame(width: Self.tabSize.width, height: Self.tabSize.height)
+                .tabItem { Label("General", systemImage: "gearshape") }
             TerminalSettingsView(settings: root.terminalSettings)
                 .frame(width: Self.tabSize.width, height: Self.tabSize.height)
                 .tabItem { Label("Terminal", systemImage: "terminal") }
@@ -34,5 +37,24 @@ struct SettingsView: View {
                 .frame(width: Self.tabSize.width, height: Self.tabSize.height)
                 .tabItem { Label("Updates", systemImage: "arrow.down.circle") }
         }
+    }
+}
+
+private struct GeneralSettingsView: View {
+    let settings: GeneralSettingsStore
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Show This Mac", isOn: Binding(
+                    get: { settings.value.showsLocalMachine },
+                    set: { value in settings.update { $0.showsLocalMachine = value } }))
+            } header: {
+                Text("Sidebar")
+            } footer: {
+                Text("Shows This Mac at the top of the machine list for opening local terminals.")
+            }
+        }
+        .formStyle(.grouped)
     }
 }

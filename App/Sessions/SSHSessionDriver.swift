@@ -49,6 +49,24 @@ protocol SSHSessionDriving: AnyObject {
 }
 
 @MainActor
+protocol LocalTerminalDriving: AnyObject {
+    func start() throws -> any TerminalSession
+}
+
+@MainActor
+final class GhosttyLocalTerminalDriver: LocalTerminalDriving {
+    private let runtime: GhosttyRuntime
+
+    init(runtime: GhosttyRuntime) {
+        self.runtime = runtime
+    }
+
+    func start() throws -> any TerminalSession {
+        try runtime.makeSession(command: .localShell())
+    }
+}
+
+@MainActor
 final class GhosttySSHSessionDriver: SSHSessionDriving {
     private let runtime: GhosttyRuntime
     private let askPass: AskPassService

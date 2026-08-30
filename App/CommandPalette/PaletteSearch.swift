@@ -128,7 +128,7 @@ struct PaletteSearch {
         for session in sessions {
             consider(sessionItem(session), haystack: [
                 session.title, session.machineName ?? "", session.profileName,
-                session.protocolKind.displayName, session.endpoint?.host ?? "",
+                session.kind.displayName, session.endpoint?.host ?? "",
             ])
         }
         for machine in snapshot.machines {
@@ -165,7 +165,7 @@ struct PaletteSearch {
         if let host = session.endpoint?.host { subtitle += " · \(host)" }
         return PaletteItem(
             kind: .session(session.id), title: session.title, subtitle: subtitle,
-            symbolName: session.protocolKind.symbolName, detail: session.state.displayName)
+            symbolName: session.kind.symbolName, detail: session.state.displayName)
     }
 
     private func profileItem(_ profile: ConnectionProfile, of machine: Machine) -> PaletteItem {

@@ -46,6 +46,7 @@ struct ConstellationApp: App {
                 CommandButton(.exportMachines, root: root)
             }
             CommandMenu("Session") {
+                CommandButton(.newLocalTerminal, root: root)
                 CommandButton(.quickConnect, root: root)
                 CommandButton(.connectDefaultProfile, root: root)
                 Divider()

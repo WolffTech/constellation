@@ -22,6 +22,7 @@ final class CompositionRoot {
     let ui = UIState()
     let palette = CommandPaletteController()
     let quickConnectHistory: QuickConnectHistory
+    let generalSettings: GeneralSettingsStore
     let terminalSettings: TerminalSettingsStore
     let shortcuts: ShortcutSettingsStore
     let vncSettings: VNCSettingsStore
@@ -33,6 +34,7 @@ final class CompositionRoot {
     private var askPass: AskPassService?
 
     init(defaults: UserDefaults = .standard) {
+        generalSettings = GeneralSettingsStore(defaults: defaults)
         terminalSettings = TerminalSettingsStore(defaults: defaults)
         shortcuts = ShortcutSettingsStore(defaults: defaults)
         vncSettings = VNCSettingsStore(defaults: defaults)
@@ -64,6 +66,7 @@ final class CompositionRoot {
                 library: library,
                 prober: TCPAddressProber(),
                 driver: driver,
+                localDriver: GhosttyLocalTerminalDriver(runtime: runtime),
                 vncDriver: RoyalVNCSessionDriver(vault: vault, settings: { vncSettings.value }),
                 rdpDriver: FreeRDPSessionDriver(vault: vault, trustStore: trustStore, settings: { rdpSettings.value }))
         } catch {
@@ -81,7 +84,8 @@ final class CompositionRoot {
         case .exportMachines: ImportExportPanels.exportMachines(from: store)
         case .commandPalette: palette.toggle()
         case .quickConnect: palette.present(mode: .connect)
-        case .connectDefaultProfile: openDefaultProfile()
+        case .newLocalTerminal: sessions?.openLocalTerminal()
+        case .connectDefaultProfile: openNewSession()
         case .closeSession: if let sessions, let id = sessions.selectedSessionID { sessions.requestClose(sessionID: id) }
         case .closeOtherSessions: if let sessions, let id = sessions.selectedSessionID { sessions.requestCloseOthers(keeping: id) }
         case .closeWindow: (NSApplication.shared.keyWindow ?? NSApplication.shared.mainWindow)?.performClose(nil)
@@ -99,11 +103,13 @@ final class CompositionRoot {
     /// Whether `perform(_:)` would do something right now; menus grey out the rest.
     func isEnabled(_ action: ShortcutAction) -> Bool {
         switch action {
-        case .newMachine, .importMachines, .exportMachines, .commandPalette, .quickConnect, .closeWindow,
+        case .newMachine, .importMachines, .exportMachines, .commandPalette, .quickConnect, .newLocalTerminal, .closeWindow,
              .nextTab, .previousTab, .saveSupportBundle:
             true
-        case .editMachine, .connectDefaultProfile:
+        case .editMachine:
             ui.selectedMachineID != nil
+        case .connectDefaultProfile:
+            ui.selectedMachineID != nil || ui.localSelection != nil || sessions?.selectedSession?.target == .local
         case .closeSession, .findInSession:
             sessions?.selectedSessionID != nil
         case .closeOtherSessions:
@@ -153,9 +159,15 @@ final class CompositionRoot {
         }
     }
 
-    /// ⌘T: the profile selected in the sidebar, else the machine's default.
-    func openDefaultProfile() {
-        guard let sessions, let machineID = ui.selectedMachineID else { return }
+    /// ⌘T: a local terminal for This Mac, otherwise the selected saved profile
+    /// or machine's default profile.
+    func openNewSession() {
+        guard let sessions else { return }
+        if ui.localSelection != nil || sessions.selectedSession?.target == .local {
+            sessions.openLocalTerminal()
+            return
+        }
+        guard let machineID = ui.selectedMachineID else { return }
         let profileID = ui.selectedProfileID
         Task {
             do {
@@ -228,6 +240,11 @@ final class CompositionRoot {
 @MainActor
 @Observable
 final class UIState {
+    enum LocalSelection {
+        case machine
+        case terminal
+    }
+
     enum Editor: Identifiable {
         case new
         case edit(MachineID)
@@ -240,6 +257,7 @@ final class UIState {
     }
 
     var editor: Editor?
+    var localSelection: LocalSelection?
     var selectedMachineID: MachineID?
     /// The profile row highlighted in the sidebar; always belongs to `selectedMachineID`.
     var selectedProfileID: ProfileID?

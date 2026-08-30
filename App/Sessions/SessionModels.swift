@@ -6,8 +6,32 @@ import ConstellationRemoteDesktop
 import Foundation
 
 enum SessionTarget: Hashable, Sendable {
+    case local
     case saved(machineID: MachineID, profileID: ProfileID)
     case quick(QuickConnectTarget)
+}
+
+enum SessionKind: Equatable, Sendable {
+    case localTerminal
+    case connection(ConnectionProtocol)
+
+    var displayName: String {
+        switch self {
+        case .localTerminal: "Local"
+        case .connection(let connectionProtocol): connectionProtocol.displayName
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .localTerminal: "terminal"
+        case .connection(let connectionProtocol): connectionProtocol.symbolName
+        }
+    }
+
+    var connectionProtocol: ConnectionProtocol? {
+        if case .connection(let connectionProtocol) = self { connectionProtocol } else { nil }
+    }
 }
 
 struct SessionEndpoint: Equatable, Sendable {
@@ -44,6 +68,7 @@ enum ConnectionFailure: Error, Equatable, Sendable, LocalizedError {
     case endedWithoutStatus
     case authenticationFailed(String)
     case remoteDesktop(String)
+    case localShellExited(Int32)
 
     var errorDescription: String? {
         switch self {
@@ -55,6 +80,7 @@ enum ConnectionFailure: Error, Equatable, Sendable, LocalizedError {
         case .endedWithoutStatus: "SSH ended without reporting its exit status."
         case .authenticationFailed(let message): message
         case .remoteDesktop(let message): message
+        case .localShellExited(let code): "The local shell exited with status \(code)."
         }
     }
 }
@@ -64,6 +90,7 @@ enum SessionState: Equatable, Sendable {
     case connecting(startedAt: ContinuousClock.Instant)
     case awaitingUserInput(SessionPrompt)
     case connected(ConnectionFacts)
+    case running(startedAt: ContinuousClock.Instant)
     case disconnecting
     case failed(ConnectionFailure)
 
@@ -73,7 +100,7 @@ enum SessionState: Equatable, Sendable {
 
     var hasLiveProcess: Bool {
         switch self {
-        case .connecting, .awaitingUserInput, .connected, .disconnecting: true
+        case .connecting, .awaitingUserInput, .connected, .running, .disconnecting: true
         case .disconnected, .failed: false
         }
     }
@@ -84,6 +111,7 @@ enum SessionState: Equatable, Sendable {
         case .connecting: "Connecting"
         case .awaitingUserInput: "Waiting for input"
         case .connected: "Connected"
+        case .running: "Running"
         case .disconnecting: "Disconnecting"
         case .failed: "Failed"
         }
@@ -114,7 +142,7 @@ struct SessionSummary: Identifiable, Equatable, Sendable {
     }
 
     /// Known once the profile was loaded; Quick Connect is always SSH.
-    var protocolKind: ConnectionProtocol = .ssh
+    var kind: SessionKind = .connection(.ssh)
     /// The profile's account name, for the Screen Sharing handoff.
     var username: String?
 }

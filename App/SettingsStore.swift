@@ -81,5 +81,13 @@ struct RDPSettings: PersistedSettings {
     var connectionQuality: RDPConnectionQuality = .automatic
 }
 
+struct GeneralSettings: PersistedSettings {
+    static let defaultsKey = "generalSettings"
+    static let `default` = GeneralSettings()
+
+    var showsLocalMachine = true
+}
+
+typealias GeneralSettingsStore = SettingsStore<GeneralSettings>
 typealias VNCSettingsStore = SettingsStore<VNCSettings>
 typealias RDPSettingsStore = SettingsStore<RDPSettings>

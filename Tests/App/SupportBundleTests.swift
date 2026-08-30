@@ -11,7 +11,7 @@ struct SupportBundleTests {
         var summary = SessionSummary(
             id: SessionID(), target: .saved(machineID: MachineID(), profileID: ProfileID()), title: "wolff-gm01", machineName: "Wolff-GM01",
             profileName: "RDP", state: state, endpoint: nil)
-        summary.protocolKind = kind
+        summary.kind = .connection(kind)
         return summary
     }
 
@@ -19,6 +19,10 @@ struct SupportBundleTests {
         let failed = summary(state: .failed(.remoteDesktop("Could not reach wolff-gm01.tail.net:3389 as nick")))
         #expect(SupportBundle.line(for: failed) == "rdp failed (remote desktop error) fit")
         #expect(SupportBundle.line(for: summary(state: .disconnected, kind: .ssh)) == "ssh disconnected")
+        let local = SessionSummary(
+            id: SessionID(), target: .local, title: "This Mac", machineName: "This Mac",
+            profileName: "Terminal", state: .running(startedAt: .now), kind: .localTerminal)
+        #expect(SupportBundle.line(for: local) == "local running")
     }
 
     @Test func filesNeverIncludeSessionNames() {

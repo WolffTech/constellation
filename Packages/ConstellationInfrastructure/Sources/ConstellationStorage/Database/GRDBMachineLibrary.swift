@@ -82,6 +82,30 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
                 t.column("is_selected", .boolean).notNull().defaults(to: false)
             }
         }
+        migrator.registerMigration("v3-local-workspace-tabs") { db in
+            try db.execute(sql: "ALTER TABLE workspace_tabs RENAME TO workspace_tabs_v2")
+            try db.execute(sql: """
+                CREATE TABLE workspace_tabs (
+                    id TEXT PRIMARY KEY,
+                    target TEXT NOT NULL CHECK (target IN ('saved', 'local')),
+                    machine_id TEXT REFERENCES machines(id) ON DELETE CASCADE,
+                    profile_id TEXT REFERENCES connection_profiles(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    position INTEGER NOT NULL UNIQUE,
+                    is_selected BOOLEAN NOT NULL DEFAULT 0,
+                    CHECK (
+                        (target = 'saved' AND machine_id IS NOT NULL AND profile_id IS NOT NULL)
+                        OR (target = 'local' AND machine_id IS NULL AND profile_id IS NULL)
+                    )
+                )
+                """)
+            try db.execute(sql: """
+                INSERT INTO workspace_tabs (id, target, machine_id, profile_id, title, position, is_selected)
+                SELECT id, 'saved', machine_id, profile_id, title, position, is_selected
+                FROM workspace_tabs_v2
+                """)
+            try db.execute(sql: "DROP TABLE workspace_tabs_v2")
+        }
         return migrator
     }
 
@@ -170,10 +194,27 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
         }
 
         let workspaceTabs = try Row.fetchAll(db, sql: "SELECT * FROM workspace_tabs ORDER BY position").map { row in
-            WorkspaceTab(
-                id: try id(SessionID.self, row["id"], table: "workspace_tabs"),
-                machineID: try id(MachineID.self, row["machine_id"], table: "workspace_tabs"),
-                profileID: try id(ProfileID.self, row["profile_id"], table: "workspace_tabs"),
+            let rowID: String = row["id"]
+            let target: WorkspaceTabTarget
+            switch row["target"] as String {
+            case "local":
+                target = .local
+            case "saved":
+                guard let machineIDText: String = row["machine_id"],
+                      let profileIDText: String = row["profile_id"] else {
+                    throw MachineLibraryError.corruptRecord(
+                        table: "workspace_tabs", id: rowID, reason: "saved target has no machine or profile")
+                }
+                target = .saved(
+                    machineID: try id(MachineID.self, machineIDText, table: "workspace_tabs"),
+                    profileID: try id(ProfileID.self, profileIDText, table: "workspace_tabs"))
+            case let value:
+                throw MachineLibraryError.corruptRecord(
+                    table: "workspace_tabs", id: rowID, reason: "unknown target \(value)")
+            }
+            return WorkspaceTab(
+                id: try id(SessionID.self, rowID, table: "workspace_tabs"),
+                target: target,
                 title: row["title"],
                 position: row["position"],
                 isSelected: row["is_selected"])
@@ -269,12 +310,24 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
         case .replaceWorkspace(let tabs):
             try db.execute(sql: "DELETE FROM workspace_tabs")
             for tab in tabs.sorted(by: { $0.position < $1.position }) {
+                let target: String
+                let machineID: String?
+                let profileID: String?
+                switch tab.target {
+                case .local:
+                    target = "local"
+                    machineID = nil
+                    profileID = nil
+                case .saved(let savedMachineID, let savedProfileID):
+                    target = "saved"
+                    machineID = savedMachineID.description
+                    profileID = savedProfileID.description
+                }
                 try db.execute(sql: """
-                    INSERT INTO workspace_tabs (id, machine_id, profile_id, title, position, is_selected)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO workspace_tabs (id, target, machine_id, profile_id, title, position, is_selected)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [
-                        tab.id.description, tab.machineID.description, tab.profileID.description,
-                        tab.title, tab.position, tab.isSelected,
+                        tab.id.description, target, machineID, profileID, tab.title, tab.position, tab.isSelected,
                     ])
             }
 
@@ -288,7 +341,10 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
         case .upsertAddress(let address): address.machineID
         case .upsertProfile(let profile): profile.machineID
         case .batch(let changes): changes.lazy.compactMap(machineID(in:)).first
-        case .replaceWorkspace(let tabs): tabs.first?.machineID
+        case .replaceWorkspace(let tabs):
+            tabs.lazy.compactMap { tab in
+                if case .saved(let machineID, _) = tab.target { machineID } else { nil }
+            }.first
         default: nil
         }
     }
