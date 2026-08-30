@@ -9,14 +9,19 @@ import ConstellationTerminal
 import Foundation
 import Observation
 
-/// A running driver session of either kind.
+/// A running driver session.
 @MainActor
 enum LiveSession {
+    case local(any TerminalSession)
     case ssh(SSHDriverSession)
     case remoteDesktop(any RemoteDesktopSession)
 
     var terminal: (any TerminalSession)? {
-        if case .ssh(let handle) = self { handle.terminal } else { nil }
+        switch self {
+        case .local(let terminal): terminal
+        case .ssh(let handle): handle.terminal
+        case .remoteDesktop: nil
+        }
     }
 
     var remoteDesktop: (any RemoteDesktopSession)? {
@@ -25,6 +30,7 @@ enum LiveSession {
 
     func close() {
         switch self {
+        case .local(let terminal): terminal.close()
         case .ssh(let handle): handle.close()
         case .remoteDesktop(let session):
             session.eventHandler = nil
@@ -45,6 +51,7 @@ final class SessionCoordinator {
     private let library: any MachineLibrary
     private let prober: any AddressProbing
     private let driver: any SSHSessionDriving
+    private let localDriver: any LocalTerminalDriving
     private let vncDriver: (any VNCSessionDriving)?
     private let rdpDriver: (any RDPSessionDriving)?
     private var handles: [SessionID: LiveSession] = [:]
@@ -57,12 +64,14 @@ final class SessionCoordinator {
         library: any MachineLibrary,
         prober: any AddressProbing,
         driver: any SSHSessionDriving,
+        localDriver: any LocalTerminalDriving,
         vncDriver: (any VNCSessionDriving)? = nil,
         rdpDriver: (any RDPSessionDriving)? = nil
     ) {
         self.library = library
         self.prober = prober
         self.driver = driver
+        self.localDriver = localDriver
         self.vncDriver = vncDriver
         self.rdpDriver = rdpDriver
     }
@@ -85,7 +94,7 @@ final class SessionCoordinator {
     }
 
     func isRemoteDesktop(_ id: SessionID) -> Bool {
-        switch sessions.first(where: { $0.id == id })?.protocolKind {
+        switch sessions.first(where: { $0.id == id })?.kind.connectionProtocol {
         case .vnc, .rdp: true
         case .ssh, .appleScreenSharing, nil: false
         }
@@ -101,10 +110,23 @@ final class SessionCoordinator {
         sessions.count { $0.profileID == profileID }
     }
 
+    /// Open local terminal tabs, regardless of process state.
+    var openLocalSessionCount: Int {
+        sessions.count { $0.target == .local }
+    }
+
     /// Selects the first matching tab in the current tab order.
     @discardableResult
     func selectFirstSession(forProfile profileID: ProfileID) -> Bool {
         guard let sessionID = sessions.first(where: { $0.profileID == profileID })?.id else { return false }
+        select(sessionID)
+        return true
+    }
+
+    /// Selects the first local terminal tab in the current tab order.
+    @discardableResult
+    func selectFirstLocalSession() -> Bool {
+        guard let sessionID = sessions.first(where: { $0.target == .local })?.id else { return false }
         select(sessionID)
         return true
     }
@@ -122,7 +144,7 @@ final class SessionCoordinator {
             machineName: machine.name,
             profileName: profile.name,
             state: .connecting(startedAt: .now),
-            protocolKind: profile.protocolKind,
+            kind: .connection(profile.protocolKind),
             username: profile.username))
         selectedSessionID = id
         scheduleWorkspaceSave()
@@ -156,6 +178,23 @@ final class SessionCoordinator {
         return id
     }
 
+    @discardableResult
+    func openLocalTerminal() -> SessionID {
+        let id = SessionID()
+        sessions.append(SessionSummary(
+            id: id,
+            target: .local,
+            title: "This Mac",
+            machineName: "This Mac",
+            profileName: "Terminal",
+            state: .connecting(startedAt: .now),
+            kind: .localTerminal))
+        selectedSessionID = id
+        scheduleWorkspaceSave()
+        startLocalTerminal(for: id)
+        return id
+    }
+
     func reconnect(sessionID: SessionID) async throws {
         guard sessions.contains(where: { $0.id == sessionID }) else {
             throw SessionCoordinatorError.unknownSession(sessionID)
@@ -171,6 +210,11 @@ final class SessionCoordinator {
         pendingConnectionFacts.removeValue(forKey: sessionID)
         reportedExitStatuses.removeValue(forKey: sessionID)
         switch handles[sessionID] {
+        case .local(let terminal):
+            handles.removeValue(forKey: sessionID)
+            update(sessionID) { $0.state = .disconnecting }
+            terminal.close()
+            update(sessionID) { $0.state = .disconnected }
         case .ssh(let handle):
             handles.removeValue(forKey: sessionID)
             update(sessionID) { $0.state = .disconnecting }
@@ -287,17 +331,29 @@ final class SessionCoordinator {
     func restoreWorkspace(from snapshot: MachineLibrarySnapshot) {
         guard sessions.isEmpty else { return }
         sessions = snapshot.workspaceTabs.compactMap { tab in
-            guard let machine = snapshot.machine(tab.machineID),
-                  let profile = snapshot.profile(tab.profileID) else { return nil }
-            return SessionSummary(
-                id: tab.id,
-                target: .saved(machineID: machine.id, profileID: profile.id),
-                title: tab.title.isEmpty ? machine.name : tab.title,
-                machineName: machine.name,
-                profileName: profile.name,
-                state: .disconnected,
-                protocolKind: profile.protocolKind,
-                username: profile.username)
+            switch tab.target {
+            case .local:
+                return SessionSummary(
+                    id: tab.id,
+                    target: .local,
+                    title: tab.title.isEmpty ? "This Mac" : tab.title,
+                    machineName: "This Mac",
+                    profileName: "Terminal",
+                    state: .disconnected,
+                    kind: .localTerminal)
+            case .saved(let machineID, let profileID):
+                guard let machine = snapshot.machine(machineID),
+                      let profile = snapshot.profile(profileID) else { return nil }
+                return SessionSummary(
+                    id: tab.id,
+                    target: .saved(machineID: machine.id, profileID: profile.id),
+                    title: tab.title.isEmpty ? machine.name : tab.title,
+                    machineName: machine.name,
+                    profileName: profile.name,
+                    state: .disconnected,
+                    kind: .connection(profile.protocolKind),
+                    username: profile.username)
+            }
         }
         selectedSessionID = snapshot.workspaceTabs.first(where: \.isSelected).flatMap { selected in
             sessions.contains(where: { $0.id == selected.id }) ? selected.id : nil
@@ -369,6 +425,9 @@ final class SessionCoordinator {
         guard let summary = sessions.first(where: { $0.id == sessionID }) else { return }
 
         switch summary.target {
+        case .local:
+            startLocalTerminal(for: sessionID, attempt: attempt)
+
         case .quick(let target):
             let request = SSHSessionRequest(
                 destination: SSHDestination(host: target.host, user: target.username, port: target.port),
@@ -403,7 +462,7 @@ final class SessionCoordinator {
             }
             update(sessionID) {
                 $0.endpoint = SessionEndpoint(host: address.host, port: port)
-                $0.protocolKind = profile.protocolKind
+                $0.kind = .connection(profile.protocolKind)
                 $0.username = profile.username
             }
 
@@ -443,6 +502,27 @@ final class SessionCoordinator {
             case .appleScreenSharing:
                 return
             }
+        }
+    }
+
+    private func startLocalTerminal(for sessionID: SessionID, attempt: UUID? = nil) {
+        let attempt = attempt ?? UUID()
+        attempts[sessionID] = attempt
+        do {
+            let terminal = try localDriver.start()
+            guard attempts[sessionID] == attempt,
+                  sessions.contains(where: { $0.id == sessionID }) else {
+                terminal.close()
+                return
+            }
+            handles[sessionID] = .local(terminal)
+            update(sessionID) { $0.state = .running(startedAt: .now) }
+            terminal.eventHandler = { [weak self, weak terminal] event in
+                guard let terminal else { return }
+                self?.handleLocal(event, terminal: terminal, for: sessionID)
+            }
+        } catch {
+            fail(sessionID, attempt: attempt, with: .launchFailed(error.localizedDescription))
         }
     }
 
@@ -550,6 +630,25 @@ final class SessionCoordinator {
 
     // MARK: Events
 
+    private func handleLocal(_ event: TerminalEvent, terminal: any TerminalSession, for sessionID: SessionID) {
+        guard case .local(let current) = handles[sessionID], current === terminal else { return }
+        switch event {
+        case .titleChanged(let title):
+            if !title.isEmpty {
+                update(sessionID) { $0.title = title }
+                scheduleWorkspaceSave()
+            }
+        case .processExited(let code, _):
+            update(sessionID) { $0.state = code == 0 ? .disconnected : .failed(.localShellExited(code)) }
+        case .closeRequested(let processAlive):
+            handleCloseRequest(processAlive: processAlive, for: sessionID)
+        case .bell:
+            NSSound.beep()
+        case .rendererHealthChanged(let healthy):
+            handleRendererHealth(healthy)
+        }
+    }
+
     private func handle(_ event: TerminalEvent, for sessionID: SessionID) {
         guard case .ssh(let handle) = handles[sessionID] else { return }
         switch event {
@@ -572,19 +671,27 @@ final class SessionCoordinator {
                 update(sessionID) { $0.state = .failed(.endedWithoutStatus) }
             }
         case .closeRequested(let processAlive):
-            if processAlive {
-                pendingClose = .session(sessionID)
-            } else {
-                close(sessionID: sessionID)
-            }
+            handleCloseRequest(processAlive: processAlive, for: sessionID)
         case .bell:
             NSSound.beep()
         case .rendererHealthChanged(let healthy):
-            if !healthy {
-                presentedError = PresentedError(
-                    title: "Terminal Renderer Stopped",
-                    message: "The terminal renderer stopped responding. Close and reopen the session.")
-            }
+            handleRendererHealth(healthy)
+        }
+    }
+
+    private func handleCloseRequest(processAlive: Bool, for sessionID: SessionID) {
+        if processAlive {
+            pendingClose = .session(sessionID)
+        } else {
+            close(sessionID: sessionID)
+        }
+    }
+
+    private func handleRendererHealth(_ healthy: Bool) {
+        if !healthy {
+            presentedError = PresentedError(
+                title: "Terminal Renderer Stopped",
+                message: "The terminal renderer stopped responding. Close and reopen the session.")
         }
     }
 
@@ -643,11 +750,18 @@ final class SessionCoordinator {
 
     private var workspaceTabs: [WorkspaceTab] {
         sessions.enumerated().compactMap { index, session in
-            guard case .saved(let machineID, let profileID) = session.target else { return nil }
+            let target: WorkspaceTabTarget
+            switch session.target {
+            case .local:
+                target = .local
+            case .saved(let machineID, let profileID):
+                target = .saved(machineID: machineID, profileID: profileID)
+            case .quick:
+                return nil
+            }
             return WorkspaceTab(
                 id: session.id,
-                machineID: machineID,
-                profileID: profileID,
+                target: target,
                 title: session.title,
                 position: index,
                 isSelected: session.id == selectedSessionID)

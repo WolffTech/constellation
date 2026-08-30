@@ -8,7 +8,7 @@
 <h1 align="center">Constellation</h1>
 
 <p align="center">
-  SSH, RDP, and VNC sessions in one native macOS app.
+  Local shell, SSH, RDP, and VNC sessions in one native macOS app.
 </p>
 
 Constellation saves your remote machines and opens each session in a tab. It uses [libghostty](https://github.com/ghostty-org/ghostty) for SSH, [FreeRDP](https://github.com/FreeRDP/FreeRDP) for RDP, and [RoyalVNCKit](https://github.com/royalapplications/royalvnc) for VNC.
@@ -20,6 +20,7 @@ Constellation saves your remote machines and opens each session in a tab. It use
 
 - Saves multiple addresses and connection profiles for each machine
 - Opens sessions in tabs and restores the tabs from your previous workspace
+- Opens the current Mac's login shell from the built-in This Mac sidebar entry
 - Runs SSH sessions in a Metal-rendered terminal that uses your existing OpenSSH configuration, keys, and agent
 - Supports custom terminal fonts, themes, and Ghostty configuration
 - Runs RDP sessions with NLA, HiDPI rendering, shared clipboard text, and a trust store for accepted certificates

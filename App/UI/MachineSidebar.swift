@@ -6,6 +6,8 @@ import SwiftUI
 
 /// What a sidebar row stands for. Machines and their profiles share one selection.
 enum SidebarItem: Hashable {
+    case localMachine
+    case localTerminal
     case machine(MachineID)
     case profile(ProfileID)
 }
@@ -19,9 +21,13 @@ struct MachineSidebar: View {
     @Environment(ShortcutSettingsStore.self) private var shortcuts
     @Binding var searchText: String
     let onDelete: (Machine) -> Void
+    @State private var localMachineExpanded = true
 
     var body: some View {
         List(selection: selection) {
+            if localMatchesSearch {
+                Section { localMachineRow }
+            }
             if !favorites.isEmpty {
                 Section("Favorites") { ForEach(favorites) { machineRow($0) } }
             }
@@ -36,7 +42,9 @@ struct MachineSidebar: View {
             if ui.selectedProfileID == nil, let machine = selectedMachine { onDelete(machine) }
         }
         .onKeyPress(.return) {
-            if let id = ui.selectedProfileID {
+            if ui.localSelection != nil {
+                openLocalTerminal()
+            } else if let id = ui.selectedProfileID {
                 connect(profileID: id)
             } else if let machine = selectedMachine {
                 connectDefaultProfile(of: machine)
@@ -52,10 +60,7 @@ struct MachineSidebar: View {
             }
         }
         .overlay {
-            if store.snapshot.machines.isEmpty {
-                ContentUnavailableView("No Machines", systemImage: "server.rack",
-                                       description: Text(shortcuts.hint(for: .newMachine).map { "Press \($0) to add one." } ?? "Add one from the File menu."))
-            } else if filtered.isEmpty {
+            if !localMatchesSearch && filtered.isEmpty {
                 ContentUnavailableView.search(text: searchText)
             }
         }
@@ -64,20 +69,38 @@ struct MachineSidebar: View {
     private var selection: Binding<SidebarItem?> {
         Binding(
             get: {
+                switch ui.localSelection {
+                case .machine: return .localMachine
+                case .terminal: return .localTerminal
+                case nil: break
+                }
                 if let id = ui.selectedProfileID { return .profile(id) }
                 return ui.selectedMachineID.map(SidebarItem.machine)
             },
             set: { item in
                 switch item {
+                case .localMachine:
+                    ui.localSelection = .machine
+                    ui.selectedMachineID = nil
+                    ui.selectedProfileID = nil
+                    sessions.select(nil)
+                case .localTerminal:
+                    guard sessions.selectFirstLocalSession() else { return }
+                    ui.localSelection = .terminal
+                    ui.selectedMachineID = nil
+                    ui.selectedProfileID = nil
                 case .machine(let id):
+                    ui.localSelection = nil
                     ui.selectedMachineID = id
                     ui.selectedProfileID = nil
                     sessions.select(nil)
                 case .profile(let id):
                     guard sessions.selectFirstSession(forProfile: id) else { return }
+                    ui.localSelection = nil
                     ui.selectedMachineID = store.snapshot.profile(id)?.machineID
                     ui.selectedProfileID = id
                 case nil:
+                    ui.localSelection = nil
                     ui.selectedMachineID = nil
                     ui.selectedProfileID = nil
                 }
@@ -86,6 +109,17 @@ struct MachineSidebar: View {
 
     private var selectedMachine: Machine? {
         ui.selectedMachineID.flatMap(store.snapshot.machine)
+    }
+
+    private var computerName: String {
+        ProcessInfo.processInfo.hostName
+    }
+
+    private var localMatchesSearch: Bool {
+        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        return query.isEmpty || ["this mac", "local", "terminal", computerName.lowercased()].contains {
+            $0.contains(query)
+        }
     }
 
     private var filtered: [Machine] {
@@ -109,6 +143,31 @@ struct MachineSidebar: View {
         let untagged = filtered.filter(\.tags.isEmpty)
         if !untagged.isEmpty { groups.append((tags.isEmpty ? "All" : "Other", untagged)) }
         return groups.map { (name: $0.0, machines: $0.1) }
+    }
+
+    private var localMachineRow: some View {
+        DisclosureGroup(isExpanded: $localMachineExpanded) {
+            Label("Terminal", systemImage: "terminal")
+                .badge(sessions.openLocalSessionCount)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2, perform: openLocalTerminal)
+                .help("Local shell · double-click to open a new session")
+                .contextMenu {
+                    Button("Open Terminal", action: openLocalTerminal)
+                }
+                .tag(SidebarItem.localTerminal)
+        } label: {
+            Label("This Mac", systemImage: "desktopcomputer")
+                .badge(sessions.openLocalSessionCount)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .help(computerName)
+                .contextMenu {
+                    Button("Open Terminal", action: openLocalTerminal)
+                }
+        }
+        .tag(SidebarItem.localMachine)
     }
 
     private func machineRow(_ machine: Machine) -> some View {
@@ -194,5 +253,9 @@ struct MachineSidebar: View {
             do { try await sessions.openDefaultProfile(for: machine.id) }
             catch { sessions.present(error, title: "Couldn’t Connect") }
         }
+    }
+
+    private func openLocalTerminal() {
+        sessions.openLocalTerminal()
     }
 }

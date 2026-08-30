@@ -117,10 +117,12 @@ struct GRDBMachineLibraryTests {
         let second = WorkspaceTab(
             id: SessionID(), machineID: machine.id, profileID: profile.id,
             title: "second", position: 0, isSelected: true)
+        let local = WorkspaceTab(
+            id: SessionID(), target: .local, title: "This Mac", position: 2)
 
-        try await library.save(.replaceWorkspace([first, second]))
+        try await library.save(.replaceWorkspace([first, local, second]))
 
-        #expect(try await library.snapshot().workspaceTabs == [second, first])
+        #expect(try await library.snapshot().workspaceTabs == [second, first, local])
         try await library.save(.replaceWorkspace([]))
         #expect(try await library.snapshot().workspaceTabs.isEmpty)
     }
@@ -130,10 +132,11 @@ struct GRDBMachineLibraryTests {
         let tab = WorkspaceTab(
             id: SessionID(), machineID: machine.id, profileID: profile.id,
             title: "SSH", position: 0)
-        try await library.save(.replaceWorkspace([tab]))
+        let local = WorkspaceTab(id: SessionID(), target: .local, title: "This Mac", position: 1)
+        try await library.save(.replaceWorkspace([tab, local]))
 
         try await library.save(.deleteProfile(profile.id))
 
-        #expect(try await library.snapshot().workspaceTabs.isEmpty)
+        #expect(try await library.snapshot().workspaceTabs == [local])
     }
 }

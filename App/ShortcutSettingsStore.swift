@@ -16,6 +16,7 @@ enum ShortcutAction: String, CaseIterable, Codable, CodingKeyRepresentable, Iden
     case exportMachines
     case commandPalette
     case quickConnect
+    case newLocalTerminal
     case connectDefaultProfile
     case closeSession
     case closeOtherSessions
@@ -39,7 +40,8 @@ enum ShortcutAction: String, CaseIterable, Codable, CodingKeyRepresentable, Iden
         case .exportMachines: "Export Machines"
         case .commandPalette: "Command Palette"
         case .quickConnect: "Quick Connect"
-        case .connectDefaultProfile: "Connect Default Profile"
+        case .newLocalTerminal: "New Local Terminal"
+        case .connectDefaultProfile: "New Session"
         case .closeSession: "Close Session"
         case .closeOtherSessions: "Close Other Sessions"
         case .closeWindow: "Close Window"
@@ -67,7 +69,7 @@ enum ShortcutAction: String, CaseIterable, Codable, CodingKeyRepresentable, Iden
         switch self {
         case .newMachine, .editMachine, .importMachines, .exportMachines, .closeSession, .closeOtherSessions, .closeWindow: "File"
         case .commandPalette, .fitToWindow, .actualSize: "View"
-        case .quickConnect, .connectDefaultProfile, .reconnect, .disconnect, .nextTab, .previousTab, .findInSession: "Session"
+        case .quickConnect, .newLocalTerminal, .connectDefaultProfile, .reconnect, .disconnect, .nextTab, .previousTab, .findInSession: "Session"
         case .saveSupportBundle: "Help"
         }
     }
@@ -79,6 +81,7 @@ enum ShortcutAction: String, CaseIterable, Codable, CodingKeyRepresentable, Iden
         case .importMachines, .exportMachines, .saveSupportBundle: nil
         case .commandPalette: Shortcut(.character("k"), [.command])
         case .quickConnect: Shortcut(.character("k"), [.command, .shift])
+        case .newLocalTerminal: nil
         case .connectDefaultProfile: Shortcut(.character("t"), [.command])
         case .closeSession: Shortcut(.character("w"), [.command])
         case .closeOtherSessions: Shortcut(.character("w"), [.command, .option])

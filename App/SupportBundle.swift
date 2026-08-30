@@ -56,11 +56,13 @@ struct SupportBundle {
     /// Protocol, state and display mode only. Failure messages stay out: they
     /// can quote the host or account the attempt used.
     static func line(for session: SessionSummary) -> String {
-        var parts = [session.protocolKind.rawValue, session.state.displayName.lowercased()]
+        let sessionKind = session.kind.connectionProtocol?.rawValue ?? "local"
+        var parts = [sessionKind, session.state.displayName.lowercased()]
         if case .failed(let failure) = session.state {
             parts.append("(\(kind(of: failure)))")
         }
-        if session.protocolKind != .ssh {
+        if let connectionProtocol = session.kind.connectionProtocol,
+           connectionProtocol != .ssh {
             // Not yet chosen reads as the picker shows it: fit.
             parts.append((session.displayMode ?? .fit) == .fit ? "fit" : "actual size")
         }
@@ -77,6 +79,7 @@ struct SupportBundle {
         case .endedWithoutStatus: "ended without status"
         case .authenticationFailed: "authentication failed"
         case .remoteDesktop: "remote desktop error"
+        case .localShellExited(let code): "local shell exited \(code)"
         }
     }
 

@@ -94,20 +94,37 @@ struct MainSplitView: View {
         .task {
             await store.reload()
             sessions.restoreWorkspace(from: store.snapshot)
-            if ui.selectedMachineID == nil && sessions.selectedSessionID == nil {
-                ui.selectedMachineID = (store.snapshot.machines.first(where: \.isFavorite) ?? store.snapshot.machines.first)?.id
+            if ui.localSelection == nil && ui.selectedMachineID == nil && sessions.selectedSessionID == nil {
+                if let machine = store.snapshot.machines.first(where: \.isFavorite) ?? store.snapshot.machines.first {
+                    ui.selectedMachineID = machine.id
+                } else {
+                    ui.localSelection = .machine
+                }
             }
         }
         // The sidebar highlight follows whichever session is showing, however it was selected.
         .onChange(of: sessions.selectedSessionID) { _, id in
             guard let id, let session = sessions.sessions.first(where: { $0.id == id }) else { return }
-            ui.selectedMachineID = session.machineID
-            ui.selectedProfileID = session.profileID
+            switch session.target {
+            case .local:
+                ui.localSelection = .terminal
+                ui.selectedMachineID = nil
+                ui.selectedProfileID = nil
+            case .saved:
+                ui.localSelection = nil
+                ui.selectedMachineID = session.machineID
+                ui.selectedProfileID = session.profileID
+            case .quick:
+                ui.localSelection = nil
+                ui.selectedMachineID = nil
+                ui.selectedProfileID = nil
+            }
         }
         .sheet(item: Binding(get: { ui.editor }, set: { ui.editor = $0 })) { editor in
             MachineEditorView(draft: draft(for: editor), store: store) { savedID in
                 ui.selectedMachineID = savedID
                 ui.selectedProfileID = nil
+                ui.localSelection = nil
                 sessions.select(nil)
             }
         }
@@ -184,6 +201,7 @@ struct MainSplitView: View {
                 machineName: saveQuickConnectName.trimmingCharacters(in: .whitespaces))
             await store.reload()
             ui.selectedMachineID = id
+            ui.localSelection = nil
         } catch {
             sessions.present(error, title: "Couldn’t Save Machine")
         }

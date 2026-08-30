@@ -3,15 +3,34 @@
 
 import Foundation
 
-/// The saved identity of a tab. Process state and Quick Connect targets never
+/// A restorable tab target. Process state and Quick Connect targets never
 /// enter the machine library.
+public enum WorkspaceTabTarget: Hashable, Sendable, Codable {
+    case local
+    case saved(machineID: MachineID, profileID: ProfileID)
+}
+
+/// The saved identity and position of a workspace tab.
 public struct WorkspaceTab: Identifiable, Hashable, Sendable, Codable {
     public let id: SessionID
-    public let machineID: MachineID
-    public let profileID: ProfileID
+    public let target: WorkspaceTabTarget
     public var title: String
     public var position: Int
     public var isSelected: Bool
+
+    public init(
+        id: SessionID,
+        target: WorkspaceTabTarget,
+        title: String,
+        position: Int,
+        isSelected: Bool = false
+    ) {
+        self.id = id
+        self.target = target
+        self.title = title
+        self.position = position
+        self.isSelected = isSelected
+    }
 
     public init(
         id: SessionID,
@@ -21,12 +40,12 @@ public struct WorkspaceTab: Identifiable, Hashable, Sendable, Codable {
         position: Int,
         isSelected: Bool = false
     ) {
-        self.id = id
-        self.machineID = machineID
-        self.profileID = profileID
-        self.title = title
-        self.position = position
-        self.isSelected = isSelected
+        self.init(
+            id: id,
+            target: .saved(machineID: machineID, profileID: profileID),
+            title: title,
+            position: position,
+            isSelected: isSelected)
     }
 }
 

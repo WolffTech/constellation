@@ -23,7 +23,8 @@ struct SessionCoordinatorTests {
         ]))
         let prober = StubProber(results: ["lan.box": false, "vpn.box": true])
         let driver = StubSSHDriver()
-        let coordinator = SessionCoordinator(library: library, prober: prober, driver: driver)
+        let coordinator = SessionCoordinator(
+            library: library, prober: prober, driver: driver, localDriver: StubLocalTerminalDriver())
 
         let id = try await coordinator.open(profileID: profile.id)
 
@@ -51,7 +52,8 @@ struct SessionCoordinatorTests {
         ]))
         let prober = StubProber(results: ["lan.box": false, "vpn.box": true])
         let driver = StubSSHDriver()
-        let coordinator = SessionCoordinator(library: library, prober: prober, driver: driver)
+        let coordinator = SessionCoordinator(
+            library: library, prober: prober, driver: driver, localDriver: StubLocalTerminalDriver())
 
         let id = try await coordinator.open(profileID: profile.id)
 
@@ -81,7 +83,8 @@ struct SessionCoordinatorTests {
         let snapshot = try await library.snapshot()
         #expect(snapshot.workspaceTabs.map(\.id) == [savedID])
 
-        let restored = SessionCoordinator(library: library, prober: StubProber(), driver: StubSSHDriver())
+        let restored = SessionCoordinator(
+            library: library, prober: StubProber(), driver: StubSSHDriver(), localDriver: StubLocalTerminalDriver())
         restored.restoreWorkspace(from: snapshot)
         #expect(restored.sessions.count == 1)
         #expect(restored.sessions[0].id == savedID)
@@ -89,12 +92,66 @@ struct SessionCoordinatorTests {
         #expect(restored.terminal(for: savedID) == nil)
     }
 
+    @Test func localTerminalRunsAndRestoresWithoutBecomingAMachine() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let localDriver = StubLocalTerminalDriver()
+        let coordinator = SessionCoordinator(
+            library: library, prober: StubProber(), driver: StubSSHDriver(), localDriver: localDriver)
+
+        let id = coordinator.openLocalTerminal()
+        let terminal = try #require(localDriver.terminals.last)
+
+        #expect(coordinator.sessions.first?.target == .local)
+        #expect(coordinator.sessions.first?.kind == .localTerminal)
+        #expect(coordinator.sessions.first?.state.isRunning == true)
+        #expect(coordinator.terminal(for: id) === terminal)
+        terminal.emit(.titleChanged("~/Developer"))
+        #expect(coordinator.sessions.first?.title == "~/Developer")
+
+        try await coordinator.persistWorkspace()
+        let snapshot = try await library.snapshot()
+        #expect(snapshot.machines.isEmpty)
+        #expect(snapshot.workspaceTabs.map(\.target) == [.local])
+
+        let restoredDriver = StubLocalTerminalDriver()
+        let restored = SessionCoordinator(
+            library: library, prober: StubProber(), driver: StubSSHDriver(), localDriver: restoredDriver)
+        restored.restoreWorkspace(from: snapshot)
+        #expect(restored.sessions.first?.target == .local)
+        #expect(restored.sessions.first?.state == .disconnected)
+        #expect(restored.terminal(for: id) == nil)
+
+        try await restored.reconnect(sessionID: id)
+        #expect(restored.sessions.first?.state.isRunning == true)
+        #expect(restoredDriver.terminals.count == 1)
+    }
+
+    @Test func localTerminalExitAndDisconnectUseProcessState() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let localDriver = StubLocalTerminalDriver()
+        let coordinator = SessionCoordinator(
+            library: library, prober: StubProber(), driver: StubSSHDriver(), localDriver: localDriver)
+        let id = coordinator.openLocalTerminal()
+        let first = try #require(localDriver.terminals.last)
+
+        first.emit(.processExited(code: 7, runtime: .seconds(1)))
+        #expect(coordinator.sessions.first?.state == .failed(.localShellExited(7)))
+
+        try await coordinator.reconnect(sessionID: id)
+        #expect(first.isClosed)
+        let second = try #require(localDriver.terminals.last)
+        coordinator.disconnect(sessionID: id)
+        #expect(second.isClosed)
+        #expect(coordinator.sessions.first?.state == .disconnected)
+    }
+
     @Test func quickConnectCanBecomeASavedMachine() async throws {
         let library = try GRDBMachineLibrary.inMemory()
         let coordinator = SessionCoordinator(
             library: library,
             prober: StubProber(),
-            driver: StubSSHDriver())
+            driver: StubSSHDriver(),
+            localDriver: StubLocalTerminalDriver())
         let sessionID = await coordinator.openQuickConnect(
             QuickConnectTarget(host: "new.box", username: "nick", port: 2222))
 
@@ -113,7 +170,8 @@ struct SessionCoordinatorTests {
         let coordinator = SessionCoordinator(
             library: library,
             prober: StubProber(),
-            driver: StubSSHDriver())
+            driver: StubSSHDriver(),
+            localDriver: StubLocalTerminalDriver())
         let one = await coordinator.openQuickConnect(QuickConnectTarget(host: "one"))
         let two = await coordinator.openQuickConnect(QuickConnectTarget(host: "two"))
         let three = await coordinator.openQuickConnect(QuickConnectTarget(host: "three"))
@@ -161,7 +219,8 @@ struct SessionCoordinatorTests {
         let library = try GRDBMachineLibrary.inMemory()
         let machine = Machine(name: "bare")
         try await library.save(.upsertMachine(machine))
-        let coordinator = SessionCoordinator(library: library, prober: StubProber(), driver: StubSSHDriver())
+        let coordinator = SessionCoordinator(
+            library: library, prober: StubProber(), driver: StubSSHDriver(), localDriver: StubLocalTerminalDriver())
 
         await #expect(throws: SessionCoordinatorError.noProfiles(machine.id)) {
             try await coordinator.openDefaultProfile(for: machine.id)
@@ -181,7 +240,9 @@ struct SessionCoordinatorTests {
             .upsertProfile(.ssh(SSHProfile(id: preferred, machineID: machine.id, name: "preferred", username: "b"))),
         ]))
         let driver = StubSSHDriver()
-        let coordinator = SessionCoordinator(library: library, prober: StubProber(results: ["box.local": true]), driver: driver)
+        let coordinator = SessionCoordinator(
+            library: library, prober: StubProber(results: ["box.local": true]),
+            driver: driver, localDriver: StubLocalTerminalDriver())
 
         let id = try await coordinator.openDefaultProfile(for: machine.id)
 
@@ -202,7 +263,7 @@ struct SessionCoordinatorTests {
         #expect(coordinator.remoteDesktop(for: id) != nil)
         #expect(coordinator.terminal(for: id) == nil)
         #expect(coordinator.sessions.first?.endpoint == SessionEndpoint(host: "vnc.box", port: 5901))
-        #expect(coordinator.sessions.first?.protocolKind == .vnc)
+        #expect(coordinator.sessions.first?.kind == .connection(.vnc))
 
         session.emit(.stateChanged(.connected))
         #expect(coordinator.sessions.first?.state.isConnected == true)
@@ -234,7 +295,8 @@ struct SessionCoordinatorTests {
         let coordinator = SessionCoordinator(
             library: library,
             prober: StubProber(),
-            driver: StubSSHDriver())
+            driver: StubSSHDriver(),
+            localDriver: StubLocalTerminalDriver())
         let selected = await coordinator.openQuickConnect(QuickConnectTarget(host: "quick.box"))
 
         #expect(!coordinator.selectFirstSession(forProfile: ProfileID()))
@@ -288,7 +350,9 @@ struct SessionCoordinatorTests {
         let address = MachineAddress(machineID: machine.id, label: "", host: "vnc.box")
         let profile = VNCProfile(machineID: machine.id)
         try await library.save(.batch([.upsertMachine(machine), .upsertAddress(address), .upsertProfile(.vnc(profile))]))
-        let coordinator = SessionCoordinator(library: library, prober: StubProber(results: ["vnc.box": true]), driver: StubSSHDriver())
+        let coordinator = SessionCoordinator(
+            library: library, prober: StubProber(results: ["vnc.box": true]),
+            driver: StubSSHDriver(), localDriver: StubLocalTerminalDriver())
 
         _ = try await coordinator.open(profileID: profile.id)
 
@@ -309,6 +373,7 @@ struct SessionCoordinatorTests {
             library: library,
             prober: StubProber(results: ["win.box": true]),
             driver: StubSSHDriver(),
+            localDriver: StubLocalTerminalDriver(),
             rdpDriver: rdpDriver)
 
         let id = try await coordinator.open(profileID: profile.id)
@@ -318,7 +383,7 @@ struct SessionCoordinatorTests {
         let session = try #require(rdpDriver.sessions.last)
         #expect(session.connectCalls == 1)
         #expect(coordinator.isRemoteDesktop(id))
-        #expect(coordinator.sessions.first?.protocolKind == .rdp)
+        #expect(coordinator.sessions.first?.kind == .connection(.rdp))
         session.emit(.stateChanged(.connected))
         #expect(coordinator.sessions.first?.state.isConnected == true)
         session.emit(.stateChanged(.disconnected(RemoteDesktopSessionFailure(message: "Authentication failed.", isAuthenticationFailure: true))))
@@ -336,6 +401,7 @@ struct SessionCoordinatorTests {
             library: library,
             prober: StubProber(results: ["win.box": true]),
             driver: StubSSHDriver(),
+            localDriver: StubLocalTerminalDriver(),
             rdpDriver: rdpDriver)
 
         _ = try await coordinator.open(profileID: profile.id)
@@ -350,7 +416,9 @@ struct SessionCoordinatorTests {
         let address = MachineAddress(machineID: machine.id, label: "", host: "win.box")
         let profile = RDPProfile(machineID: machine.id)
         try await library.save(.batch([.upsertMachine(machine), .upsertAddress(address), .upsertProfile(.rdp(profile))]))
-        let coordinator = SessionCoordinator(library: library, prober: StubProber(results: ["win.box": true]), driver: StubSSHDriver())
+        let coordinator = SessionCoordinator(
+            library: library, prober: StubProber(results: ["win.box": true]),
+            driver: StubSSHDriver(), localDriver: StubLocalTerminalDriver())
 
         _ = try await coordinator.open(profileID: profile.id)
 
@@ -368,6 +436,7 @@ struct SessionCoordinatorTests {
             library: library,
             prober: StubProber(results: ["vnc.box": true]),
             driver: StubSSHDriver(),
+            localDriver: StubLocalTerminalDriver(),
             vncDriver: vncDriver)
         return (coordinator, library, machine, vncDriver)
     }
@@ -380,7 +449,9 @@ struct SessionCoordinatorTests {
         try await library.save(.batch([.upsertMachine(machine), .upsertAddress(address), .upsertProfile(.ssh(profile))]))
         let driver = StubSSHDriver()
         return (
-            SessionCoordinator(library: library, prober: StubProber(results: ["box.local": true]), driver: driver),
+            SessionCoordinator(
+                library: library, prober: StubProber(results: ["box.local": true]),
+                driver: driver, localDriver: StubLocalTerminalDriver()),
             library,
             profile,
             driver)
@@ -394,6 +465,10 @@ private extension SessionState {
 
     var isConnecting: Bool {
         if case .connecting = self { true } else { false }
+    }
+
+    var isRunning: Bool {
+        if case .running = self { true } else { false }
     }
 }
 
@@ -423,6 +498,17 @@ private final class StubSSHDriver: SSHSessionDriving {
         let tracked = StubDriverSession(terminal: terminal, exitStatusChannel: channel)
         sessions.append(tracked)
         return SSHDriverSession(terminal: terminal, exitStatusChannel: channel) { tracked.didFinish = true }
+    }
+}
+
+@MainActor
+private final class StubLocalTerminalDriver: LocalTerminalDriving {
+    private(set) var terminals: [StubTerminal] = []
+
+    func start() throws -> any TerminalSession {
+        let terminal = StubTerminal()
+        terminals.append(terminal)
+        return terminal
     }
 }
 
