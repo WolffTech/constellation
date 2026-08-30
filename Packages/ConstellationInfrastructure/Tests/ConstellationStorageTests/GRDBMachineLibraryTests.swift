@@ -140,3 +140,111 @@ struct GRDBMachineLibraryTests {
         #expect(try await library.snapshot().workspaceTabs == [local])
     }
 }
+
+struct GRDBMachineGroupTests {
+    private func seeded() async throws -> (GRDBMachineLibrary, MachineGroup, MachineGroup, [Machine]) {
+        let library = try GRDBMachineLibrary.inMemory()
+        let lab = MachineGroup(name: "Lab")
+        let work = MachineGroup(name: "Work")
+        let machines = [
+            Machine(name: "c", groupID: lab.id),
+            Machine(name: "a", groupID: lab.id),
+            Machine(name: "b", groupID: work.id),
+            Machine(name: "z"),
+        ]
+        try await library.save(.batch([.upsertGroup(lab), .upsertGroup(work)] + machines.map { .upsertMachine($0) }))
+        return (library, lab, work, machines)
+    }
+
+    @Test func newGroupsAndMachinesAppendInInsertionOrder() async throws {
+        let (library, lab, work, machines) = try await seeded()
+        let snapshot = try await library.snapshot()
+        #expect(snapshot.groups.map(\.name) == ["Lab", "Work"])
+        #expect(snapshot.groups.map(\.position) == [0, 1])
+        #expect(snapshot.machines.map(\.name) == ["c", "a", "b", "z"])
+        #expect(snapshot.machines(in: lab.id).map(\.position) == [0, 1])
+        #expect(snapshot.machines(in: work.id).map(\.id) == [machines[2].id])
+        #expect(snapshot.machines(in: nil).map(\.id) == [machines[3].id])
+    }
+
+    @Test func upsertKeepsThePositionUnlessTheGroupChanges() async throws {
+        let (library, lab, work, machines) = try await seeded()
+        var renamed = machines[0]
+        renamed.name = "c2"
+        renamed.position = 99
+        try await library.save(.upsertMachine(renamed))
+        #expect(try await library.snapshot().machines(in: lab.id).map(\.name) == ["c2", "a"])
+
+        var moved = machines[0]
+        moved.groupID = work.id
+        try await library.save(.upsertMachine(moved))
+        let snapshot = try await library.snapshot()
+        #expect(snapshot.machines(in: work.id).map(\.name) == ["b", "c"])
+        #expect(snapshot.machines(in: work.id).map(\.position) == [0, 1])
+        #expect(snapshot.machines(in: lab.id).map(\.position) == [0])
+        // Renaming a group keeps its place.
+        try await library.save(.upsertGroup(MachineGroup(id: lab.id, name: "Home lab", position: 7)))
+        #expect(try await library.snapshot().groups.map(\.name) == ["Home lab", "Work"])
+    }
+
+    @Test func movesMachinesWithinAndAcrossGroups() async throws {
+        let (library, lab, work, machines) = try await seeded()
+        try await library.save(.moveMachine(machines[1].id, to: lab.id, position: 0))
+        #expect(try await library.snapshot().machines(in: lab.id).map(\.name) == ["a", "c"])
+
+        try await library.save(.moveMachine(machines[3].id, to: work.id, position: 0))
+        var snapshot = try await library.snapshot()
+        #expect(snapshot.machines(in: work.id).map(\.name) == ["z", "b"])
+        #expect(snapshot.machines(in: work.id).map(\.position) == [0, 1])
+        #expect(snapshot.machines(in: nil).isEmpty)
+
+        // Past the end clamps; the old group closes the gap.
+        try await library.save(.moveMachine(machines[1].id, to: nil, position: 50))
+        snapshot = try await library.snapshot()
+        #expect(snapshot.machines(in: nil).map(\.name) == ["a"])
+        #expect(snapshot.machines(in: lab.id).map(\.name) == ["c"])
+        #expect(snapshot.machines(in: lab.id).map(\.position) == [0])
+        #expect(snapshot.machines.map(\.name) == ["c", "z", "b", "a"])
+    }
+
+    @Test func movesGroups() async throws {
+        let (library, lab, _, _) = try await seeded()
+        try await library.save(.moveGroup(lab.id, position: 1))
+        let snapshot = try await library.snapshot()
+        #expect(snapshot.groups.map(\.name) == ["Work", "Lab"])
+        #expect(snapshot.groups.map(\.position) == [0, 1])
+        #expect(snapshot.machines.map(\.name) == ["b", "c", "a", "z"])
+    }
+
+    @Test func deletingAGroupUngroupsItsMachinesAfterTheExistingOnes() async throws {
+        let (library, lab, work, _) = try await seeded()
+        try await library.save(.deleteGroup(lab.id))
+        let snapshot = try await library.snapshot()
+        #expect(snapshot.groups.map(\.id) == [work.id])
+        #expect(snapshot.groups.map(\.position) == [0])
+        #expect(snapshot.machines(in: nil).map(\.name) == ["z", "c", "a"])
+        #expect(snapshot.machines(in: nil).map(\.position) == [0, 1, 2])
+    }
+
+    @Test func deletingAMachineClosesTheGap() async throws {
+        let (library, lab, _, machines) = try await seeded()
+        try await library.save(.deleteMachine(machines[0].id))
+        #expect(try await library.snapshot().machines(in: lab.id).map(\.position) == [0])
+    }
+
+    @Test func rejectsUnknownGroups() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let group = GroupID()
+        await #expect(throws: MachineLibraryError.unknownGroup(group)) {
+            try await library.save(.upsertMachine(Machine(name: "x", groupID: group)))
+        }
+        let machine = Machine(name: "x")
+        try await library.save(.upsertMachine(machine))
+        await #expect(throws: MachineLibraryError.unknownGroup(group)) {
+            try await library.save(.moveMachine(machine.id, to: group, position: 0))
+        }
+        await #expect(throws: MachineLibraryError.unknownGroup(group)) {
+            try await library.save(.moveGroup(group, position: 0))
+        }
+    }
+}
