@@ -58,6 +58,31 @@ struct RDPSessionTests {
         #expect(failure?.message == RDPSession.connectFailureMessage, "got \(String(describing: failure))")
     }
 
+    @Test func releasingWhileConnectingIgnoresQueuedCallbacks() async {
+        let passwordRequested = AsyncStream<Void>.makeStream()
+        let configuration = RDPSessionConfiguration(
+            host: "127.0.0.1", port: 1, username: "tester", width: 640, height: 480)
+        var session: RDPSession? = RDPSession(
+            configuration: configuration,
+            password: {
+                passwordRequested.continuation.yield()
+                return "unused"
+            },
+            verifyCertificate: { _ in .acceptOnce })
+        weak let releasedSession = session
+
+        session?.connect()
+        for await _ in passwordRequested.stream { break }
+        session = nil
+
+        for _ in 0..<100 where releasedSession != nil {
+            await Task.yield()
+        }
+        #expect(releasedSession == nil)
+        // Drain the callbacks FreeRDP queued while its client thread stopped.
+        for _ in 0..<10 { await Task.yield() }
+    }
+
     private func withTimeout<T: Sendable>(seconds: Double, _ body: @escaping @MainActor @Sendable () async -> T?) async -> T? {
         await withTaskGroup(of: T?.self) { group in
             group.addTask { await body() }
