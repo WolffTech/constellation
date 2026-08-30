@@ -30,10 +30,12 @@ struct MachineSidebar: View {
                 Section { localMachineRow }
             }
             if !favorites.isEmpty {
-                Section("Favorites") { ForEach(favorites) { machineRow($0) } }
+                sectionTitle("Favorites")
+                ForEach(favorites) { machineRow($0) }
             }
             ForEach(groups, id: \.name) { group in
-                Section(group.name) { ForEach(group.machines) { machineRow($0) } }
+                sectionTitle(group.name)
+                ForEach(group.machines) { machineRow($0) }
             }
         }
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search machines")
@@ -152,6 +154,18 @@ struct MachineSidebar: View {
         let untagged = filtered.filter(\.tags.isEmpty)
         if !untagged.isEmpty { groups.append((tags.isEmpty ? "All" : "Other", untagged)) }
         return groups.map { (name: $0.0, machines: $0.1) }
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Plain rows start inside the disclosure column; pull the title back to where a Section header sits.
+            .padding(.leading, -13)
+            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 0, trailing: 0))
+            .selectionDisabled()
+            .accessibilityHeading(.h2)
     }
 
     private var localMachineRow: some View {
