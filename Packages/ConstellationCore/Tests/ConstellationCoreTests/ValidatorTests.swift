@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Nick Wolff <nick@wolff.tech>
 // SPDX-License-Identifier: GPL-3.0-only
 
+import Foundation
 import Testing
 @testable import ConstellationCore
 
@@ -44,6 +45,20 @@ struct ValidatorTests {
     @Test func keyFileProfilesNeedAPath() {
         let profile = SSHProfile(machineID: MachineID(), name: "Key", authentication: .keyFile(path: " "))
         #expect(throws: ValidationError.missingKeyFile(profile: "Key")) { try Validator.validate(.ssh(profile)) }
+    }
+
+    @Test func groupsNeedAName() {
+        #expect(throws: ValidationError.emptyGroupName) { try Validator.validate(.upsertGroup(MachineGroup(name: "  "))) }
+        #expect(throws: Never.self) { try Validator.validate(.moveGroup(GroupID(), position: 3)) }
+    }
+
+    @Test func machinesDecodeWithoutGroupFields() throws {
+        let json = """
+        {"id":"\(MachineID())","name":"alpha","notes":"","tags":["a"],"isFavorite":false}
+        """
+        let machine = try JSONDecoder().decode(Machine.self, from: Data(json.utf8))
+        #expect(machine.groupID == nil)
+        #expect(machine.position == 0)
     }
 
     @Test func batchValidationStopsAtTheFirstProblem() {
