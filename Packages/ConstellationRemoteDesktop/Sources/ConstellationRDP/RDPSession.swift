@@ -26,6 +26,8 @@ public final class RDPSession: RemoteDesktopSession {
     private let host: RDPHostView
     private let surface = RDPSurfaceView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
     private var handle: OpaquePointer?
+    /// Callback tasks retain this token; its weak session link dies safely during teardown.
+    private var callbackContext: RDPCallbackContext?
     private var connectTask: Task<Void, Never>?
     private var resizeTask: Task<Void, Never>?
     /// Present only when the configuration shares the clipboard.
@@ -122,8 +124,10 @@ public final class RDPSession: RemoteDesktopSession {
     // MARK: Session start
 
     private func startSession(password: String?) {
+        let callbackContext = RDPCallbackContext(session: self)
+        self.callbackContext = callbackContext
         let callbacks = crdp_callbacks(
-            context: Unmanaged.passUnretained(self).toOpaque(),
+            context: Unmanaged.passUnretained(callbackContext).toOpaque(),
             state_changed: rdpStateChanged,
             frame_resized: rdpFrameResized,
             frame_updated: rdpFrameUpdated,
@@ -157,6 +161,7 @@ public final class RDPSession: RemoteDesktopSession {
         }
 
         guard handle != nil else {
+            self.callbackContext = nil
             transition(to: .disconnected(RemoteDesktopSessionFailure(message: Self.createFailureMessage)))
             return
         }
@@ -350,39 +355,51 @@ private func withOptionalCString<Result>(_ string: String?, _ body: (UnsafePoint
 
 // MARK: - C callback trampolines
 
-private func session(from context: UnsafeMutableRawPointer?) -> RDPSession? {
+private final class RDPCallbackContext: @unchecked Sendable {
+    weak var session: RDPSession?
+
+    @MainActor
+    init(session: RDPSession) {
+        self.session = session
+    }
+}
+
+private func callbackContext(from context: UnsafeMutableRawPointer?) -> RDPCallbackContext? {
     guard let context else { return nil }
-    return Unmanaged<RDPSession>.fromOpaque(context).takeUnretainedValue()
+    return Unmanaged<RDPCallbackContext>.fromOpaque(context).takeUnretainedValue()
 }
 
 private func rdpStateChanged(_ context: UnsafeMutableRawPointer?, _ state: crdp_state, _ failure: crdp_failure) {
-    let boxed = SendableBox((context, state, failure))
+    guard let callbackContext = callbackContext(from: context) else { return }
     Task { @MainActor in
-        session(from: boxed.value.0)?.stateChanged(boxed.value.1, failure: boxed.value.2)
+        callbackContext.session?.stateChanged(state, failure: failure)
     }
 }
 
 private func rdpFrameResized(_ context: UnsafeMutableRawPointer?, _ buffer: UnsafePointer<UInt8>?, _ width: UInt32, _ height: UInt32, _ stride: UInt32) {
-    guard let buffer else { return }
-    let boxed = SendableBox((context, buffer, Int(width), Int(height), Int(stride)))
+    guard let callbackContext = callbackContext(from: context), let buffer else { return }
+    let boxed = SendableBox(buffer)
     Task { @MainActor in
-        session(from: boxed.value.0)?.frameResized(buffer: boxed.value.1, width: boxed.value.2, height: boxed.value.3, stride: boxed.value.4)
+        callbackContext.session?.frameResized(
+            buffer: boxed.value,
+            width: Int(width),
+            height: Int(height),
+            stride: Int(stride))
     }
 }
 
 private func rdpClipboardText(_ context: UnsafeMutableRawPointer?, _ utf8: UnsafePointer<CChar>?) {
-    guard let utf8 else { return }
+    guard let callbackContext = callbackContext(from: context), let utf8 else { return }
     let text = String(cString: utf8) // copied; the C string dies with the call
-    let boxed = SendableBox(context)
     Task { @MainActor in
-        session(from: boxed.value)?.clipboardTextReceived(text)
+        callbackContext.session?.clipboardTextReceived(text)
     }
 }
 
 private func rdpFrameUpdated(_ context: UnsafeMutableRawPointer?, _ x: UInt32, _ y: UInt32, _ width: UInt32, _ height: UInt32) {
-    let boxed = SendableBox(context)
+    guard let callbackContext = callbackContext(from: context) else { return }
     Task { @MainActor in
-        session(from: boxed.value)?.frameUpdated()
+        callbackContext.session?.frameUpdated()
     }
 }
 
@@ -401,11 +418,11 @@ private func rdpVerifyCertificate(_ context: UnsafeMutableRawPointer?, _ certifi
         hostMismatch: cert.host_mismatch,
         changed: cert.changed)
 
+    guard let callbackContext = callbackContext(from: context) else { return CRDP_CERT_REJECT }
     let verdictBox = VerdictBox()
     let semaphore = DispatchSemaphore(value: 0)
-    let boxed = SendableBox(context)
     Task { @MainActor in
-        verdictBox.verdict = await session(from: boxed.value)?.verifyCertificate(swiftCertificate) ?? .reject
+        verdictBox.verdict = await callbackContext.session?.verifyCertificate(swiftCertificate) ?? .reject
         semaphore.signal()
     }
     semaphore.wait()

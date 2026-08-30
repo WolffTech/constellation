@@ -66,7 +66,7 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
             guard let window = windows[summary.id] else { continue }
             window.tab.title = summary.tabTitle
             window.tab.toolTip = tabToolTip(for: summary)
-            window.updateTabStatus(summary.tabStatus)
+            window.updateTabStatus(summary.tabStatus, showsAccessoryCloseButton: sessions.count == 1)
         }
 
         applyTabOrder(sessions.map(\.id))
@@ -185,8 +185,12 @@ private final class SessionWindow: NSWindow {
     weak var manager: SessionWindowManager?
     private var closesFromCoordinator = false
     private var tabStatus: SessionTabStatus?
+    private var showsAccessoryCloseButton = false
     private lazy var tabAccessory = NSHostingView(
-        rootView: SessionTabAccessory(status: .disconnected))
+        rootView: SessionTabAccessory(status: .disconnected, showsCloseButton: false) { [weak self] in
+            guard let self else { return }
+            self.manager?.requestClose(self.sessionID)
+        })
 
     init(
         sessionID: SessionID,
@@ -211,10 +215,17 @@ private final class SessionWindow: NSWindow {
         manager?.presentQuickConnect()
     }
 
-    func updateTabStatus(_ status: SessionTabStatus) {
-        guard status != tabStatus else { return }
+    func updateTabStatus(_ status: SessionTabStatus, showsAccessoryCloseButton: Bool) {
+        guard status != tabStatus || showsAccessoryCloseButton != self.showsAccessoryCloseButton else { return }
         tabStatus = status
-        tabAccessory.rootView = SessionTabAccessory(status: status)
+        self.showsAccessoryCloseButton = showsAccessoryCloseButton
+        tabAccessory.rootView = SessionTabAccessory(
+            status: status,
+            showsCloseButton: showsAccessoryCloseButton
+        ) { [weak self] in
+            guard let self else { return }
+            self.manager?.requestClose(self.sessionID)
+        }
         tabAccessory.toolTip = status.accessibilityLabel
         tab.accessoryView = tabAccessory
     }
@@ -265,8 +276,33 @@ extension SessionSummary {
 
 private struct SessionTabAccessory: View {
     let status: SessionTabStatus
+    let showsCloseButton: Bool
+    let onClose: () -> Void
+    @State private var closeHovered = false
 
     var body: some View {
+        HStack(spacing: 4) {
+            statusIndicator
+            if showsCloseButton {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .frame(width: 13, height: 13)
+                        .background(closeHovered ? Color.primary.opacity(0.12) : .clear, in: Circle())
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .onHover { closeHovered = $0 }
+                .help("Close Session")
+                .accessibilityLabel("Close Session")
+            }
+        }
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private var statusIndicator: some View {
         Group {
             switch status {
             case .connecting, .disconnecting:
