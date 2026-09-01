@@ -12,6 +12,58 @@ enum SidebarItem: Hashable {
     case profile(ProfileID)
 }
 
+/// One row of the grouped machine list. `header(nil)` is the ungrouped section.
+private enum SidebarRow: Hashable, Identifiable {
+    case header(GroupID?)
+    case machine(MachineID)
+
+    var id: String {
+        switch self {
+        case .header(let group): "header-\(group?.description ?? "none")"
+        case .machine(let id): "machine-\(id)"
+        }
+    }
+}
+
+private enum GroupPrompt: Identifiable {
+    case new
+    case rename(MachineGroup)
+
+    var id: String {
+        switch self {
+        case .new: "new"
+        case .rename(let group): group.id.description
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .new: "New Group"
+        case .rename: "Rename Group"
+        }
+    }
+
+    var confirmTitle: String {
+        switch self {
+        case .new: "Create"
+        case .rename: "Rename"
+        }
+    }
+}
+
+/// Row styling shared by every sidebar section header.
+private struct SectionRowChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            // Plain rows start inside the disclosure column; pull the title back to where a Section header sits.
+            .padding(.leading, -13)
+            .listRowInsets(EdgeInsets())
+            .contentShape(Rectangle())
+            .selectionDisabled()
+            .accessibilityHeading(.h2)
+    }
+}
+
 struct MachineSidebar: View {
     let store: MachineStore
     let sessions: SessionCoordinator
@@ -23,6 +75,9 @@ struct MachineSidebar: View {
     @Binding var searchText: String
     let onDelete: (Machine) -> Void
     @State private var localMachineExpanded = true
+    @State private var groupPrompt: GroupPrompt?
+    @State private var groupPromptName = ""
+    @State private var dragSession = SidebarDragSession()
 
     var body: some View {
         List(selection: selection) {
@@ -31,15 +86,33 @@ struct MachineSidebar: View {
             }
             if !favorites.isEmpty {
                 sectionTitle("Favorites")
-                ForEach(favorites) { machineRow($0) }
+                // Favorites mirror machines that live in a group; reordering happens there.
+                ForEach(favorites) { machineRow($0, reorderable: false) }
             }
-            ForEach(groups, id: \.name) { group in
-                sectionTitle(group.name)
-                ForEach(group.machines) { machineRow($0) }
+            ForEach(rows) { row in
+                switch row {
+                case .header(let groupID):
+                    groupHeader(groupID)
+                case .machine(let id):
+                    if let machine = store.snapshot.machine(id) {
+                        // Positions mean nothing in a filtered list.
+                        machineRow(machine, reorderable: !isSearching)
+                    }
+                }
             }
         }
+        .animation(.default, value: rows)
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search machines")
         .navigationTitle("Machines")
+        .onChange(of: groupPrompt?.id) { _, _ in
+            if case .rename(let group) = groupPrompt { groupPromptName = group.name } else { groupPromptName = "" }
+        }
+        .alert(groupPrompt?.title ?? "", isPresented: groupPromptPresented) {
+            TextField("Name", text: $groupPromptName)
+            Button("Cancel", role: .cancel) {}
+            Button(groupPrompt?.confirmTitle ?? "OK", action: commitGroupPrompt)
+                .disabled(groupPromptName.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
         .onDeleteCommand {
             // Profiles are removed in the editor; ⌫ only deletes whole machines.
             if ui.selectedProfileID == nil, let machine = selectedMachine { onDelete(machine) }
@@ -60,6 +133,10 @@ struct MachineSidebar: View {
             ToolbarItem {
                 Button { ui.editor = .new } label: { Label("New Machine", systemImage: "plus") }
                     .help("New Machine" + shortcuts.hintSuffix(for: .newMachine))
+            }
+            ToolbarItem {
+                Button { groupPrompt = .new } label: { Label("New Group", systemImage: "folder.badge.plus") }
+                    .help("New Group")
             }
         }
         .overlay {
@@ -146,26 +223,144 @@ struct MachineSidebar: View {
 
     private var favorites: [Machine] { filtered.filter(\.isFavorite) }
 
-    private var groups: [(name: String, machines: [Machine])] {
-        let tags = Set(filtered.flatMap(\.tags)).sorted()
-        var groups: [(String, [Machine])] = tags.map { tag in
-            (tag.capitalized, filtered.filter { $0.tags.contains(tag) })
+    private var isSearching: Bool { !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// Headers and machines as one flat list, so a single `onMove` covers
+    /// reordering within a group and moving between groups. Empty groups
+    /// stay visible as drop targets unless a search is narrowing the list.
+    private var rows: [SidebarRow] {
+        var rows: [SidebarRow] = []
+        for group in store.snapshot.groups {
+            let machines = filtered.filter { $0.groupID == group.id }
+            if machines.isEmpty && isSearching { continue }
+            rows.append(.header(group.id))
+            rows += machines.map { .machine($0.id) }
         }
-        let untagged = filtered.filter(\.tags.isEmpty)
-        if !untagged.isEmpty { groups.append((tags.isEmpty ? "All" : "Other", untagged)) }
-        return groups.map { (name: $0.0, machines: $0.1) }
+        let ungrouped = filtered.filter { $0.groupID == nil }
+        if !ungrouped.isEmpty {
+            rows.append(.header(nil))
+            rows += ungrouped.map { .machine($0.id) }
+        }
+        return rows
+    }
+
+    // MARK: Drag and drop
+
+    /// `itemProvider` is the row-level drag source; `onDrag` never fires on macOS List rows.
+    private func dragSource<Content: View>(_ item: SidebarDragItem, _ content: Content) -> some View {
+        content.itemProvider {
+            dragSession.item = item
+            return item.itemProvider()
+        }
+    }
+
+    private func dropTarget<Content: View>(
+        _ content: Content,
+        accepts: @escaping (SidebarDragItem) -> Bool,
+        edgeSensitive: @escaping (SidebarDragItem) -> Bool = { _ in true },
+        perform: @escaping (SidebarDragItem, DropEdge) -> Void
+    ) -> some View {
+        content.modifier(SidebarDropModifier(
+            session: dragSession, accepts: accepts, edgeSensitive: edgeSensitive, perform: perform))
+    }
+
+    /// Puts a machine before or after `anchor` in the anchor's group, or at the top of `groupID` without one.
+    private func place(_ id: MachineID, in groupID: GroupID?, relativeTo anchor: Machine? = nil, edge: DropEdge) {
+        var position = 0
+        if let anchor {
+            let siblings = store.snapshot.machines(in: anchor.groupID).filter { $0.id != id }
+            let index = siblings.firstIndex { $0.id == anchor.id } ?? siblings.count
+            position = edge == .above ? index : index + 1
+        }
+        Task { await store.save(.moveMachine(id, to: groupID, position: position)) }
+    }
+
+    /// Puts a group before or after `anchor`, or last without one.
+    private func place(group id: GroupID, relativeTo anchor: GroupID?, edge: DropEdge) {
+        let others = store.snapshot.groups.filter { $0.id != id }
+        var position = others.count
+        if let anchor, let index = others.firstIndex(where: { $0.id == anchor }) {
+            position = edge == .above ? index : index + 1
+        }
+        Task { await store.save(.moveGroup(id, position: position)) }
+    }
+
+    private func groupHeader(_ groupID: GroupID?) -> some View {
+        let group = groupID.flatMap(store.snapshot.group)
+        let title = group?.name ?? (store.snapshot.groups.isEmpty ? "All" : "Other")
+        let header = dropTarget(
+            sectionTitleText(title),
+            accepts: { item in
+                switch item {
+                case .machine: true
+                case .group(let id): id != groupID
+                }
+            },
+            // A machine dropped on a header goes to the top of that group; a group lands beside it.
+            edgeSensitive: { item in
+                if case .group = item, groupID != nil { true } else { false }
+            },
+            perform: { item, edge in
+                switch item {
+                case .machine(let id): place(id, in: groupID, edge: edge)
+                case .group(let id): place(group: id, relativeTo: groupID, edge: groupID == nil ? .above : edge)
+                }
+            })
+        return Group {
+            if let groupID, !isSearching {
+                dragSource(.group(groupID), header)
+            } else {
+                header
+            }
+        }
+            .modifier(SectionRowChrome())
+            .contextMenu {
+                if let group {
+                    let index = store.snapshot.groups.firstIndex(of: group) ?? 0
+                    Button("Rename…") { groupPrompt = .rename(group) }
+                    Button("Move Up") { Task { await store.save(.moveGroup(group.id, position: index - 1)) } }
+                        .disabled(index == 0)
+                    Button("Move Down") { Task { await store.save(.moveGroup(group.id, position: index + 1)) } }
+                        .disabled(index == store.snapshot.groups.count - 1)
+                    Divider()
+                }
+                Button("New Group…") { groupPrompt = .new }
+                if let group {
+                    Divider()
+                    Button("Delete Group", role: .destructive) { Task { await store.save(.deleteGroup(group.id)) } }
+                        .help("Its machines move to Other")
+                }
+            }
+    }
+
+    private var groupPromptPresented: Binding<Bool> {
+        Binding(get: { groupPrompt != nil }, set: { if !$0 { groupPrompt = nil } })
+    }
+
+    private func commitGroupPrompt() {
+        guard let prompt = groupPrompt else { return }
+        let name = groupPromptName.trimmingCharacters(in: .whitespaces)
+        groupPrompt = nil
+        let group = switch prompt {
+        case .new: MachineGroup(name: name)
+        case .rename(var existing): { existing.name = name; return existing }()
+        }
+        Task { await store.save(.upsertGroup(group)) }
     }
 
     private func sectionTitle(_ title: String) -> some View {
+        sectionTitleText(title).modifier(SectionRowChrome())
+    }
+
+    /// The header content alone; drag and drop wrap this so the drag image
+    /// is not clipped by the chrome's negative padding.
+    private func sectionTitleText(_ title: String) -> some View {
         Text(title)
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
+            // Inside the view, not row insets, so the whole row height takes drops.
+            .padding(.top, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            // Plain rows start inside the disclosure column; pull the title back to where a Section header sits.
-            .padding(.leading, -13)
-            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 0, trailing: 0))
-            .selectionDisabled()
-            .accessibilityHeading(.h2)
     }
 
     private var localMachineRow: some View {
@@ -193,12 +388,23 @@ struct MachineSidebar: View {
         .tag(SidebarItem.localMachine)
     }
 
-    private func machineRow(_ machine: Machine) -> some View {
+    private func machineRow(_ machine: Machine, reorderable: Bool) -> some View {
+        Group {
+            if reorderable {
+                dragSource(.machine(machine.id), machineDisclosure(machine, reorderable: true))
+            } else {
+                machineDisclosure(machine, reorderable: false)
+            }
+        }
+        .tag(SidebarItem.machine(machine.id))
+    }
+
+    private func machineDisclosure(_ machine: Machine, reorderable: Bool) -> some View {
         let profiles = store.snapshot.orderedProfiles(for: machine)
         return DisclosureGroup(isExpanded: expansion.binding(for: machine.id)) {
-            ForEach(profiles) { profileRow($0, of: machine) }
+            ForEach(profiles) { profileRow($0, of: machine, reorderable: reorderable) }
         } label: {
-            Label(machine.name, systemImage: "server.rack")
+            let label = Label(machine.name, systemImage: "server.rack")
                 .badge(sessions.openSessionCount(forMachine: machine.id))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -213,6 +419,17 @@ struct MachineSidebar: View {
                         }
                     }
                     Button("Edit…") { ui.editor = .edit(machine.id) }
+                    if !store.snapshot.groups.isEmpty {
+                        Menu("Move to") {
+                            ForEach(store.snapshot.groups) { group in
+                                Button(group.name) { moveToEnd(machine, of: group.id) }
+                                    .disabled(machine.groupID == group.id)
+                            }
+                            Divider()
+                            Button("Other") { moveToEnd(machine, of: nil) }
+                                .disabled(machine.groupID == nil)
+                        }
+                    }
                     Button(machine.isFavorite ? "Remove from Favorites" : "Add to Favorites") {
                         var updated = machine
                         updated.isFavorite.toggle()
@@ -221,12 +438,30 @@ struct MachineSidebar: View {
                     Divider()
                     Button("Delete…", role: .destructive) { onDelete(machine) }
                 }
+            if reorderable {
+                dropTarget(
+                    label,
+                    accepts: { $0 != .machine(machine.id) && $0 != machine.groupID.map(SidebarDragItem.group) },
+                    edgeSensitive: { isMachine($0) },
+                    perform: { item, edge in
+                        switch item {
+                        case .machine(let id): place(id, in: machine.groupID, relativeTo: machine, edge: edge)
+                        // A group dropped in the middle of another group lands after it.
+                        case .group(let id): place(group: id, relativeTo: machine.groupID, edge: .below)
+                        }
+                    })
+            } else {
+                label
+            }
         }
-        .tag(SidebarItem.machine(machine.id))
     }
 
-    private func profileRow(_ profile: ConnectionProfile, of machine: Machine) -> some View {
-        Label(profile.name, systemImage: profile.protocolKind.symbolName)
+    private func isMachine(_ item: SidebarDragItem) -> Bool {
+        if case .machine = item { true } else { false }
+    }
+
+    private func profileRow(_ profile: ConnectionProfile, of machine: Machine, reorderable: Bool) -> some View {
+        let label = Label(profile.name, systemImage: profile.protocolKind.symbolName)
             .badge(sessions.openSessionCount(forProfile: profile.id))
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -240,7 +475,28 @@ struct MachineSidebar: View {
                     Button("Forget Trusted Certificate") { forgetCertificate(for: rdp, of: machine) }
                 }
             }
-            .tag(SidebarItem.profile(profile.id))
+        // Profiles hang below their machine, so a drop here means "after that machine".
+        return Group {
+            if reorderable {
+                dropTarget(
+                    label,
+                    accepts: { $0 != .machine(machine.id) && $0 != machine.groupID.map(SidebarDragItem.group) },
+                    edgeSensitive: { _ in false },
+                    perform: { item, _ in
+                        switch item {
+                        case .machine(let id): place(id, in: machine.groupID, relativeTo: machine, edge: .below)
+                        case .group(let id): place(group: id, relativeTo: machine.groupID, edge: .below)
+                        }
+                    })
+            } else {
+                label
+            }
+        }
+        .tag(SidebarItem.profile(profile.id))
+    }
+
+    private func moveToEnd(_ machine: Machine, of groupID: GroupID?) {
+        Task { await store.save(.moveMachine(machine.id, to: groupID, position: .max)) }
     }
 
     private func hosts(of machine: Machine) -> String {

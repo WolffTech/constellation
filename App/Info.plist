@@ -34,5 +34,18 @@
 	<string>https://github.com/WolffTech/constellation/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>0shliaoaTRxwGoSI/xqVjxhTLuVSxa1a14gpXrcyfxM=</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Constellation sidebar item</string>
+			<key>UTTypeIdentifier</key>
+			<string>tech.wolff.constellation.sidebar-item</string>
+		</dict>
+	</array>
 </dict>
 </plist>

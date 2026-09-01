@@ -119,6 +119,11 @@ targets:
         # private half from the SPARKLE_ED_PRIVATE_KEY secret.
         SUFeedURL: https://github.com/WolffTech/constellation/releases/latest/download/appcast.xml
         SUPublicEDKey: 0shliaoaTRxwGoSI/xqVjxhTLuVSxa1a14gpXrcyfxM=
+        # Pasteboard type for dragging sidebar rows; see SidebarDragDrop.swift.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: tech.wolff.constellation.sidebar-item
+            UTTypeDescription: Constellation sidebar item
+            UTTypeConformsTo: [public.data]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: tech.wolff.Constellation
