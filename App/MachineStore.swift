@@ -90,7 +90,7 @@ final class MachineStore {
     func importData(_ data: Data) async {
         do {
             let document = try MachineExport.decode(data)
-            await save(MachineExport.importChange(for: document))
+            await save(MachineExport.importChange(for: document, into: snapshot))
         } catch {
             presentedError = error.localizedDescription
         }

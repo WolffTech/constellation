@@ -40,7 +40,7 @@ struct MachineEditorView: View {
             if showsAllOptions {
                 fullEditor
             } else {
-                QuickSetupForm(draft: $draft, nameFocused: $nameFocused) { showsAllOptions = true }
+                QuickSetupForm(draft: $draft, store: store, nameFocused: $nameFocused) { showsAllOptions = true }
             }
         }
         .toolbar {
@@ -90,7 +90,7 @@ struct MachineEditorView: View {
     private var detail: some View {
         switch selection {
         case .general:
-            GeneralForm(draft: $draft, nameFocused: $nameFocused)
+            GeneralForm(draft: $draft, store: store, nameFocused: $nameFocused)
         case .address(let id):
             if let index = draft.addresses.firstIndex(where: { $0.id == id }) {
                 AddressForm(address: $draft.addresses[index])
@@ -147,6 +147,7 @@ private extension MachineDraft {
 
 private struct QuickSetupForm: View {
     @Binding var draft: MachineDraft
+    let store: MachineStore
     var nameFocused: FocusState<Bool>.Binding
     let onMoreOptions: () -> Void
 
@@ -164,6 +165,7 @@ private struct QuickSetupForm: View {
                 .pickerStyle(.segmented)
                 TextField("Username", text: $draft.quickUsername, prompt: Text(usernamePrompt))
                 SecureField("Password", text: $draft.quickPassword, prompt: Text(passwordPrompt))
+                GroupPicker(groupID: $draft.machine.groupID, store: store)
                 TextField("Tags", text: $draft.tagsText, prompt: Text("Comma separated"))
             } footer: {
                 Text(footer)
@@ -303,6 +305,7 @@ private struct EditorSidebar: View {
 
 private struct GeneralForm: View {
     @Binding var draft: MachineDraft
+    let store: MachineStore
     var nameFocused: FocusState<Bool>.Binding
 
     var body: some View {
@@ -310,6 +313,7 @@ private struct GeneralForm: View {
             Section {
                 TextField("Name", text: $draft.machine.name, prompt: Text("Machine name"))
                     .focused(nameFocused)
+                GroupPicker(groupID: $draft.machine.groupID, store: store)
                 TextField("Tags", text: $draft.tagsText, prompt: Text("Comma separated"))
                 Toggle("Favorite", isOn: $draft.machine.isFavorite)
             }
@@ -319,6 +323,41 @@ private struct GeneralForm: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Chooses the sidebar group. A group created here is saved right away,
+/// even if the machine is later cancelled.
+private struct GroupPicker: View {
+    @Binding var groupID: GroupID?
+    let store: MachineStore
+    @State private var creating = false
+    @State private var newName = ""
+
+    var body: some View {
+        LabeledContent("Group") {
+            HStack {
+                Picker("Group", selection: $groupID) {
+                    Text("None").tag(GroupID?.none)
+                    ForEach(store.snapshot.groups) { Text($0.name).tag(Optional($0.id)) }
+                }
+                .labelsHidden()
+                Button("New…") { newName = ""; creating = true }
+            }
+        }
+        .alert("New Group", isPresented: $creating) {
+            TextField("Name", text: $newName)
+            Button("Cancel", role: .cancel) {}
+            Button("Create", action: create)
+                .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+    }
+
+    private func create() {
+        let group = MachineGroup(name: newName.trimmingCharacters(in: .whitespaces))
+        Task {
+            if await store.save(.upsertGroup(group)) { groupID = group.id }
+        }
     }
 }
 

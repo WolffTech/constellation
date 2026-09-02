@@ -5,6 +5,7 @@ import Foundation
 
 public enum ValidationError: Error, Hashable, Sendable, LocalizedError {
     case emptyMachineName
+    case emptyGroupName
     case emptyHost
     case invalidHost(String)
     case invalidPort(Int)
@@ -15,6 +16,7 @@ public enum ValidationError: Error, Hashable, Sendable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .emptyMachineName: "Give the machine a name."
+        case .emptyGroupName: "Give the group a name."
         case .emptyHost: "Enter a hostname or IP address."
         case .invalidHost(let host): "“\(host)” is not a valid hostname or IP address."
         case .invalidPort(let port): "Port \(port) is out of range. Use 1 through 65535."
@@ -28,6 +30,10 @@ public enum ValidationError: Error, Hashable, Sendable, LocalizedError {
 public enum Validator {
     public static func validate(_ machine: Machine) throws(ValidationError) {
         if machine.name.trimmingCharacters(in: .whitespaces).isEmpty { throw .emptyMachineName }
+    }
+
+    public static func validate(_ group: MachineGroup) throws(ValidationError) {
+        if group.name.trimmingCharacters(in: .whitespaces).isEmpty { throw .emptyGroupName }
     }
 
     public static func validate(_ address: MachineAddress) throws(ValidationError) {
@@ -75,13 +81,15 @@ public enum Validator {
     public static func validate(_ change: MachineLibraryChange) throws(ValidationError) {
         switch change {
         case .upsertMachine(let machine): try validate(machine)
+        case .upsertGroup(let group): try validate(group)
         case .upsertAddress(let address): try validate(address)
         case .upsertProfile(let profile): try validate(profile)
         case .upsertCredential(let credential):
             if credential.label.trimmingCharacters(in: .whitespaces).isEmpty { throw .emptyProfileName }
         case .batch(let changes):
             for change in changes { try validate(change) }
-        case .deleteMachine, .deleteAddress, .deleteProfile, .deleteCredential, .replaceWorkspace:
+        case .deleteMachine, .deleteGroup, .moveMachine, .moveGroup, .deleteAddress, .deleteProfile, .deleteCredential,
+             .replaceWorkspace:
             break
         }
     }

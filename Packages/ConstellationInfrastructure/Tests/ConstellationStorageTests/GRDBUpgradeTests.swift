@@ -87,7 +87,12 @@ struct GRDBUpgradeTests {
 
         let library = try GRDBMachineLibrary(path: path)
         let snapshot = try await library.snapshot()
-        #expect(snapshot.machines == [machine])
+        // v4 turns the tag into a group.
+        let homelab = try #require(snapshot.groups.first)
+        #expect(homelab.name == "Homelab")
+        var grouped = machine
+        grouped.groupID = homelab.id
+        #expect(snapshot.machines == [grouped])
         #expect(snapshot.addresses == [address])
         #expect(snapshot.credentials == [credential])
         #expect(snapshot.profiles == [.ssh(profile)])
@@ -146,5 +151,41 @@ struct GRDBUpgradeTests {
             VALUES (?, ?, 'ssh', 'SSH', 2, '{}')
             """, arguments: [ProfileID().description, machine.id.description])
         await #expect(throws: MachineLibraryError.self) { try await library.snapshot() }
+    }
+
+    @Test func upgradesTagsToGroupsFromSchemaV3() async throws {
+        let path = temporaryPath("library.sqlite")
+        let alpha = Machine(name: "alpha", tags: ["homelab", "debian"])
+        let beta = Machine(name: "beta", tags: ["homelab"])
+        let gamma = Machine(name: "gamma")
+
+        do {
+            try FileManager.default.createDirectory(
+                at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true)
+            let v3 = try DatabaseQueue(path: path)
+            try await GRDBMachineLibrary.migrator.migrate(v3, upTo: "v3-local-workspace-tabs")
+            try await v3.write { db in
+                for machine in [gamma, beta, alpha] {
+                    try db.execute(sql: "INSERT INTO machines (id, name, notes, is_favorite) VALUES (?, ?, '', 0)",
+                                   arguments: [machine.id.description, machine.name])
+                    for tag in machine.tags {
+                        try db.execute(sql: "INSERT INTO machine_tags (machine_id, tag) VALUES (?, ?)",
+                                       arguments: [machine.id.description, tag])
+                    }
+                }
+            }
+        }
+
+        let snapshot = try await GRDBMachineLibrary(path: path).snapshot()
+        // Sections as the tag sidebar showed them: tags alphabetically, machines by name.
+        #expect(snapshot.groups.map(\.name) == ["Debian", "Homelab"])
+        #expect(snapshot.groups.map(\.position) == [0, 1])
+        let debian = snapshot.groups[0].id
+        let homelab = snapshot.groups[1].id
+        #expect(snapshot.machines(in: debian).map(\.name) == ["alpha"])
+        #expect(snapshot.machines(in: homelab).map(\.name) == ["beta"])
+        #expect(snapshot.machines(in: nil).map(\.name) == ["gamma"])
+        #expect(snapshot.machines.map(\.name) == ["alpha", "beta", "gamma"])
+        #expect(snapshot.machine(alpha.id)?.tags == ["homelab", "debian"], "tags survive as search metadata")
     }
 }

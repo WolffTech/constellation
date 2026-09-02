@@ -106,7 +106,48 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
                 """)
             try db.execute(sql: "DROP TABLE workspace_tabs_v2")
         }
+        migrator.registerMigration("v4-groups") { db in
+            try db.create(table: "machine_groups") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("position", .integer).notNull().defaults(to: 0)
+            }
+            try db.alter(table: "machines") { t in
+                t.add(column: "group_id", .text).references("machine_groups", onDelete: .setNull)
+                t.add(column: "position", .integer).notNull().defaults(to: 0)
+            }
+            try migrateTagsToGroups(db)
+        }
         return migrator
+    }
+
+    /// Recreates the sidebar as it looked before groups: one group per tag in
+    /// alphabetical order, each machine in its alphabetically first tag,
+    /// machines by name. Tags themselves are kept.
+    private static func migrateTagsToGroups(_ db: Database) throws {
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT t.machine_id, t.tag FROM machine_tags t JOIN machines m ON m.id = t.machine_id ORDER BY t.tag, m.name
+            """)
+        var groupIDs: [String: String] = [:]
+        var firstTag: [String: String] = [:]
+        for row in rows {
+            let tag: String = row["tag"]
+            let machineID: String = row["machine_id"]
+            if groupIDs[tag] == nil {
+                let id = GroupID().description
+                groupIDs[tag] = id
+                try db.execute(sql: "INSERT INTO machine_groups (id, name, position) VALUES (?, ?, ?)",
+                               arguments: [id, tag.capitalized, groupIDs.count - 1])
+            }
+            if firstTag[machineID] == nil { firstTag[machineID] = tag }
+        }
+        for (machineID, tag) in firstTag {
+            try db.execute(sql: "UPDATE machines SET group_id = ? WHERE id = ?", arguments: [groupIDs[tag], machineID])
+        }
+        for id in try String.fetchAll(db, sql: "SELECT id FROM machine_groups") {
+            try renumberMachines(in: GroupID(uuidString: id), db)
+        }
+        try renumberMachines(in: nil, db)
     }
 
     // MARK: MachineLibrary
@@ -142,7 +183,14 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
             tags[id, default: []].insert(row["tag"])
         }
 
-        let machines = try Row.fetchAll(db, sql: "SELECT * FROM machines ORDER BY name").map { row in
+        let groups = try Row.fetchAll(db, sql: "SELECT * FROM machine_groups ORDER BY position, name").map { row in
+            MachineGroup(id: try id(GroupID.self, row["id"], table: "machine_groups"), name: row["name"], position: row["position"])
+        }
+
+        let machines = try Row.fetchAll(db, sql: """
+            SELECT m.* FROM machines m LEFT JOIN machine_groups g ON g.id = m.group_id
+            ORDER BY g.position IS NULL, g.position, m.position, m.name
+            """).map { row in
             let id = try id(MachineID.self, row["id"], table: "machines")
             return Machine(
                 id: id,
@@ -150,7 +198,9 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
                 notes: row["notes"],
                 tags: tags[id] ?? [],
                 isFavorite: row["is_favorite"],
-                defaultProfileID: (row["default_profile_id"] as String?).flatMap(ProfileID.init(uuidString:)))
+                defaultProfileID: (row["default_profile_id"] as String?).flatMap(ProfileID.init(uuidString:)),
+                groupID: (row["group_id"] as String?).flatMap(GroupID.init(uuidString:)),
+                position: row["position"])
         }
 
         let addresses = try Row.fetchAll(db, sql: "SELECT * FROM machine_addresses ORDER BY priority, label").map { row in
@@ -222,6 +272,7 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
 
         return MachineLibrarySnapshot(
             machines: machines,
+            groups: groups,
             addresses: addresses,
             profiles: profiles,
             credentials: credentials,
@@ -251,20 +302,75 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
     private static func apply(_ change: MachineLibraryChange, _ db: Database) throws {
         switch change {
         case .upsertMachine(let machine):
+            if let groupID = machine.groupID { try requireGroup(groupID, db) }
+            // The position is the library's: kept unless the machine is new or changed group.
+            let existing = try Row.fetchOne(db, sql: "SELECT group_id, position FROM machines WHERE id = ?", arguments: [machine.id.description])
+            let previousGroup = existing.map { ($0["group_id"] as String?).flatMap(GroupID.init(uuidString:)) }
+            let position: Int = if let existing, previousGroup == machine.groupID {
+                existing["position"]
+            } else {
+                try nextMachinePosition(in: machine.groupID, db)
+            }
             try db.execute(sql: """
-                INSERT INTO machines (id, name, notes, is_favorite, default_profile_id)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO machines (id, name, notes, is_favorite, default_profile_id, group_id, position)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name, notes = excluded.notes,
-                    is_favorite = excluded.is_favorite, default_profile_id = excluded.default_profile_id
-                """, arguments: [machine.id.description, machine.name, machine.notes, machine.isFavorite, machine.defaultProfileID?.description])
+                    is_favorite = excluded.is_favorite, default_profile_id = excluded.default_profile_id,
+                    group_id = excluded.group_id, position = excluded.position
+                """, arguments: [
+                    machine.id.description, machine.name, machine.notes, machine.isFavorite, machine.defaultProfileID?.description,
+                    machine.groupID?.description, position,
+                ])
+            if let previousGroup, previousGroup != machine.groupID { try renumberMachines(in: previousGroup, db) }
             try db.execute(sql: "DELETE FROM machine_tags WHERE machine_id = ?", arguments: [machine.id.description])
             for tag in machine.tags.sorted() {
                 try db.execute(sql: "INSERT INTO machine_tags (machine_id, tag) VALUES (?, ?)", arguments: [machine.id.description, tag])
             }
 
         case .deleteMachine(let id):
+            let groupID = try Row.fetchOne(db, sql: "SELECT group_id FROM machines WHERE id = ?", arguments: [id.description])
+                .flatMap { ($0["group_id"] as String?).flatMap(GroupID.init(uuidString:)) }
             try db.execute(sql: "DELETE FROM machines WHERE id = ?", arguments: [id.description])
+            try renumberMachines(in: groupID, db)
+
+        case .upsertGroup(let group):
+            let position = try Int.fetchOne(db, sql: "SELECT coalesce(max(position) + 1, 0) FROM machine_groups") ?? 0
+            try db.execute(sql: """
+                INSERT INTO machine_groups (id, name, position) VALUES (?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET name = excluded.name
+                """, arguments: [group.id.description, group.name, position])
+
+        case .deleteGroup(let id):
+            try requireGroup(id, db)
+            // Its machines go after the ungrouped ones before the FK nulls their group.
+            let offset = try nextMachinePosition(in: nil, db)
+            try db.execute(sql: "UPDATE machines SET position = position + ? WHERE group_id = ?", arguments: [offset, id.description])
+            try db.execute(sql: "DELETE FROM machine_groups WHERE id = ?", arguments: [id.description])
+            try renumberMachines(in: nil, db)
+            try renumberGroups(db)
+
+        case .moveMachine(let id, let groupID, let position):
+            if let groupID { try requireGroup(groupID, db) }
+            guard let row = try Row.fetchOne(db, sql: "SELECT group_id FROM machines WHERE id = ?", arguments: [id.description]) else {
+                throw MachineLibraryError.unknownMachine(id)
+            }
+            let previousGroup = (row["group_id"] as String?).flatMap(GroupID.init(uuidString:))
+            var siblings = try machineIDs(in: groupID, db).filter { $0 != id.description }
+            siblings.insert(id.description, at: max(0, min(position, siblings.count)))
+            for (index, siblingID) in siblings.enumerated() {
+                try db.execute(sql: "UPDATE machines SET group_id = ?, position = ? WHERE id = ?",
+                               arguments: [groupID?.description, index, siblingID])
+            }
+            if previousGroup != groupID { try renumberMachines(in: previousGroup, db) }
+
+        case .moveGroup(let id, let position):
+            try requireGroup(id, db)
+            var ids = try String.fetchAll(db, sql: "SELECT id FROM machine_groups ORDER BY position, name").filter { $0 != id.description }
+            ids.insert(id.description, at: max(0, min(position, ids.count)))
+            for (index, groupID) in ids.enumerated() {
+                try db.execute(sql: "UPDATE machine_groups SET position = ? WHERE id = ?", arguments: [index, groupID])
+            }
 
         case .upsertAddress(let address):
             try db.execute(sql: """
@@ -333,6 +439,33 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
 
         case .batch(let changes):
             for change in changes { try apply(change, db) }
+        }
+    }
+
+    private static func requireGroup(_ id: GroupID, _ db: Database) throws {
+        guard try Bool.fetchOne(db, sql: "SELECT EXISTS (SELECT 1 FROM machine_groups WHERE id = ?)", arguments: [id.description]) == true else {
+            throw MachineLibraryError.unknownGroup(id)
+        }
+    }
+
+    private static func machineIDs(in groupID: GroupID?, _ db: Database) throws -> [String] {
+        try String.fetchAll(db, sql: "SELECT id FROM machines WHERE group_id IS ? ORDER BY position, name", arguments: [groupID?.description])
+    }
+
+    private static func nextMachinePosition(in groupID: GroupID?, _ db: Database) throws -> Int {
+        try Int.fetchOne(db, sql: "SELECT coalesce(max(position) + 1, 0) FROM machines WHERE group_id IS ?", arguments: [groupID?.description]) ?? 0
+    }
+
+    /// Makes positions dense again after a removal.
+    private static func renumberMachines(in groupID: GroupID?, _ db: Database) throws {
+        for (index, id) in try machineIDs(in: groupID, db).enumerated() {
+            try db.execute(sql: "UPDATE machines SET position = ? WHERE id = ?", arguments: [index, id])
+        }
+    }
+
+    private static func renumberGroups(_ db: Database) throws {
+        for (index, id) in try String.fetchAll(db, sql: "SELECT id FROM machine_groups ORDER BY position, name").enumerated() {
+            try db.execute(sql: "UPDATE machine_groups SET position = ? WHERE id = ?", arguments: [index, id])
         }
     }
 

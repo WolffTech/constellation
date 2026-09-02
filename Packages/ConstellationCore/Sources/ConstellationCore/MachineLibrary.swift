@@ -6,7 +6,9 @@ import Foundation
 /// Everything the app needs to show and edit machines. Loaded whole; the
 /// library is small and a snapshot keeps the UI free of query plumbing.
 public struct MachineLibrarySnapshot: Hashable, Sendable {
+    /// Sidebar order: by group position, then machine position.
     public var machines: [Machine]
+    public var groups: [MachineGroup]
     public var addresses: [MachineAddress]
     public var profiles: [ConnectionProfile]
     public var credentials: [CredentialReference]
@@ -14,12 +16,14 @@ public struct MachineLibrarySnapshot: Hashable, Sendable {
 
     public init(
         machines: [Machine] = [],
+        groups: [MachineGroup] = [],
         addresses: [MachineAddress] = [],
         profiles: [ConnectionProfile] = [],
         credentials: [CredentialReference] = [],
         workspaceTabs: [WorkspaceTab] = []
     ) {
         self.machines = machines
+        self.groups = groups.sorted { ($0.position, $0.name) < ($1.position, $1.name) }
         self.addresses = addresses
         self.profiles = profiles
         self.credentials = credentials
@@ -30,6 +34,15 @@ public struct MachineLibrarySnapshot: Hashable, Sendable {
 
     public func machine(_ id: MachineID) -> Machine? {
         machines.first { $0.id == id }
+    }
+
+    public func group(_ id: GroupID) -> MachineGroup? {
+        groups.first { $0.id == id }
+    }
+
+    /// Machines in a group (`nil` for the ungrouped ones) in sidebar order.
+    public func machines(in groupID: GroupID?) -> [Machine] {
+        machines.filter { $0.groupID == groupID }.sorted { ($0.position, $0.name) < ($1.position, $1.name) }
     }
 
     /// Addresses for a machine in priority order.
@@ -60,6 +73,14 @@ public struct MachineLibrarySnapshot: Hashable, Sendable {
 public indirect enum MachineLibraryChange: Hashable, Sendable {
     case upsertMachine(Machine)
     case deleteMachine(MachineID)
+    /// A new group goes last; an existing one keeps its position.
+    case upsertGroup(MachineGroup)
+    /// Its machines become ungrouped, appended after the existing ones.
+    case deleteGroup(GroupID)
+    /// Places the machine at `position` among the target group's machines,
+    /// clamped to the end. Siblings are renumbered.
+    case moveMachine(MachineID, to: GroupID?, position: Int)
+    case moveGroup(GroupID, position: Int)
     case upsertAddress(MachineAddress)
     case deleteAddress(AddressID)
     case upsertProfile(ConnectionProfile)
@@ -80,6 +101,7 @@ public protocol MachineLibrary: Sendable {
 public enum MachineLibraryError: Error, Hashable, Sendable, LocalizedError {
     case validation(ValidationError)
     case unknownMachine(MachineID)
+    case unknownGroup(GroupID)
     /// A stored record could not be decoded. Surfaced rather than dropped.
     case corruptRecord(table: String, id: String, reason: String)
 
@@ -87,6 +109,7 @@ public enum MachineLibraryError: Error, Hashable, Sendable, LocalizedError {
         switch self {
         case .validation(let error): error.errorDescription
         case .unknownMachine(let id): "No machine with id \(id) exists."
+        case .unknownGroup(let id): "No group with id \(id) exists."
         case .corruptRecord(let table, let id, let reason): "Stored \(table) record \(id) could not be read: \(reason)"
         }
     }
