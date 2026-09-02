@@ -22,8 +22,8 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         reconcile(sessions: sessions)
 
         if let selectedSessionID, let window = windows[selectedSessionID] {
-            browserWindow.orderOut(nil)
             select(window)
+            browserWindow.orderOut(nil)
         } else if selectedSessionID == nil, browserWindow.isVisible {
             browserWindow.makeKeyAndOrderFront(nil)
         }
@@ -53,6 +53,15 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
 
         let sessionIDs = Set(sessions.map(\.id))
         let closedIDs = windows.keys.filter { !sessionIDs.contains($0) }
+        let closingWindows = closedIDs.compactMap { windows[$0] }
+
+        if sessions.isEmpty, let outgoingWindow = closingWindows.first(where: \.isKeyWindow)
+            ?? closingWindows.first(where: { $0.tabGroup?.selectedWindow === $0 })
+            ?? closingWindows.first {
+            stopObservingTabGroup()
+            showBrowserWindow(browserWindow, replacing: outgoingWindow)
+        }
+
         for id in closedIDs {
             guard let window = windows.removeValue(forKey: id) else { continue }
             window.closeFromCoordinator()
@@ -74,7 +83,11 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
 
         if sessions.isEmpty {
             stopObservingTabGroup()
-            browserWindow.makeKeyAndOrderFront(nil)
+            if !browserWindow.isVisible {
+                browserWindow.makeKeyAndOrderFront(nil)
+            }
+            hideTabBarIfNeeded(on: browserWindow)
+            browserWindow.animationBehavior = .default
         }
     }
 
@@ -100,11 +113,15 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         window.tabbingIdentifier = "tech.wolff.Constellation.sessions"
         window.tabbingMode = .preferred
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
 
         if let anchor = orderedWindows.first {
             anchor.addTabbedWindow(window, ordered: .above)
+        } else {
+            // Keep the first session in the existing virtual window while the
+            // browser tab is removed. This avoids presenting a second window.
+            SessionWindowHandoff.prepare(window, replacing: browserWindow)
         }
-        window.makeKeyAndOrderFront(nil)
         showTabBarIfNeeded(on: window)
         return window
     }
@@ -130,9 +147,22 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
     }
 
+    private func showBrowserWindow(_ browserWindow: NSWindow, replacing window: SessionWindow) {
+        SessionWindowHandoff.prepare(browserWindow, replacing: window)
+        select(browserWindow)
+    }
+
     private func showTabBarIfNeeded(on window: NSWindow) {
         DispatchQueue.main.async {
             if window.tabGroup?.isTabBarVisible != true {
+                window.toggleTabBar(nil)
+            }
+        }
+    }
+
+    private func hideTabBarIfNeeded(on window: NSWindow) {
+        DispatchQueue.main.async {
+            if window.tabGroup?.isTabBarVisible == true {
                 window.toggleTabBar(nil)
             }
         }
@@ -177,6 +207,17 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
             parts.append("\(facts.host):\(facts.port)")
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+@MainActor
+private enum SessionWindowHandoff {
+    static func prepare(_ incomingWindow: NSWindow, replacing outgoingWindow: NSWindow) {
+        incomingWindow.animationBehavior = .none
+        outgoingWindow.animationBehavior = .none
+        incomingWindow.setFrame(outgoingWindow.frame, display: false)
+        outgoingWindow.addTabbedWindow(incomingWindow, ordered: .above)
+        incomingWindow.tabGroup?.selectedWindow = incomingWindow
     }
 }
 
