@@ -106,3 +106,36 @@ struct SidebarDropModifier: ViewModifier {
         }
     }
 }
+
+/// Turns off the outline view's own drop feedback. Near the middle of an
+/// expandable row AppKit proposes a drop *onto* the item and paints the
+/// whole row; the sidebar draws its own insertion lines instead.
+struct SidebarTableDropFeedback: NSViewRepresentable {
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ nsView: Probe, context: Context) {}
+
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            // The table is a sibling subtree of the List's background, so search from each ancestor.
+            DispatchQueue.main.async { [weak self] in
+                var ancestor = self?.superview
+                while let view = ancestor {
+                    if let table = Self.tableView(in: view) {
+                        table.draggingDestinationFeedbackStyle = .none
+                        return
+                    }
+                    ancestor = view.superview
+                }
+            }
+        }
+
+        private static func tableView(in view: NSView) -> NSTableView? {
+            if let table = view as? NSTableView { return table }
+            for subview in view.subviews {
+                if let table = tableView(in: subview) { return table }
+            }
+            return nil
+        }
+    }
+}

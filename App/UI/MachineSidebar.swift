@@ -101,6 +101,7 @@ struct MachineSidebar: View {
                 }
             }
         }
+        .background(SidebarTableDropFeedback())
         .animation(.default, value: rows)
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search machines")
         .navigationTitle("Machines")
