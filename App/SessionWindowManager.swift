@@ -24,8 +24,11 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         if let selectedSessionID, let window = windows[selectedSessionID] {
             select(window)
             browserWindow.orderOut(nil)
-        } else if selectedSessionID == nil, browserWindow.isVisible {
-            browserWindow.makeKeyAndOrderFront(nil)
+        } else if selectedSessionID == nil {
+            let activeWindow = orderedWindows.first(where: \.isKeyWindow)
+                ?? orderedWindows.first(where: { $0.tabGroup?.selectedWindow === $0 })
+                ?? orderedWindows.first
+            SessionWindowHandoff.showBrowser(browserWindow, alongside: activeWindow)
         }
     }
 
@@ -211,7 +214,16 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
 }
 
 @MainActor
-private enum SessionWindowHandoff {
+enum SessionWindowHandoff {
+    static func showBrowser(_ browserWindow: NSWindow, alongside sessionWindow: NSWindow?) {
+        // Machine details share the session's native tab group without closing its connections.
+        if let sessionWindow, browserWindow.tabGroup !== sessionWindow.tabGroup || browserWindow.tabGroup == nil {
+            prepare(browserWindow, replacing: sessionWindow)
+        }
+        browserWindow.tabGroup?.selectedWindow = browserWindow
+        browserWindow.makeKeyAndOrderFront(nil)
+    }
+
     static func prepare(_ incomingWindow: NSWindow, replacing outgoingWindow: NSWindow) {
         incomingWindow.animationBehavior = .none
         outgoingWindow.animationBehavior = .none

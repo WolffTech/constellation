@@ -355,6 +355,21 @@ struct SessionCoordinatorTests {
         #expect(coordinator.selectedSessionID == selected)
     }
 
+    @Test func showingMachineDetailsKeepsItsConnectionAvailableForSelection() async throws {
+        let (coordinator, _, profile, driver) = try await coordinatorWithOneMachine()
+        let id = try await coordinator.open(profileID: profile.id)
+        let terminal = try #require(driver.sessions.first?.terminal)
+
+        coordinator.select(nil)
+
+        #expect(coordinator.selectedSessionID == nil)
+        #expect(coordinator.sessions.map(\.id) == [id])
+        #expect(!terminal.isClosed)
+        #expect(coordinator.selectFirstSession(forProfile: profile.id))
+        #expect(coordinator.selectedSessionID == id)
+        #expect(driver.sessions.count == 1)
+    }
+
     @Test func vncAuthenticationFailuresAreReportedAsSuch() async throws {
         let (coordinator, library, machine, vncDriver) = try await coordinatorWithVNCMachine()
         let profile = try #require(await library.snapshot().profiles(for: machine.id).first)
