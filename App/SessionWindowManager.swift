@@ -228,7 +228,10 @@ enum SessionWindowHandoff {
         incomingWindow.animationBehavior = .none
         outgoingWindow.animationBehavior = .none
         incomingWindow.setFrame(outgoingWindow.frame, display: false)
-        outgoingWindow.addTabbedWindow(incomingWindow, ordered: .above)
+        // AppKit asserts when a window is added to a tab group it already belongs to.
+        if incomingWindow.tabGroup == nil || incomingWindow.tabGroup !== outgoingWindow.tabGroup {
+            outgoingWindow.addTabbedWindow(incomingWindow, ordered: .above)
+        }
         incomingWindow.tabGroup?.selectedWindow = incomingWindow
     }
 }

@@ -46,6 +46,32 @@ struct SessionWindowHandoffTests {
         #expect(browser.tabGroup?.windows.count == 3)
     }
 
+    @Test func closingTheLastSessionAfterShowingMachineDetailsReusesTheSharedTab() throws {
+        let browser = makeWindow()
+        let session = makeWindow()
+        defer { [browser, session].forEach { $0.close() } }
+
+        SessionWindowHandoff.prepare(session, replacing: browser)
+        browser.orderOut(nil)
+        session.makeKeyAndOrderFront(nil)
+        SessionWindowHandoff.showBrowser(browser, alongside: session)
+        let group = try #require(browser.tabGroup)
+        #expect(group === session.tabGroup)
+        // Let AppKit build the tab bar so the group is in the same state as a running app.
+        if !group.isTabBarVisible {
+            session.toggleTabBar(nil)
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        // Closing the last session hands the group back to the browser without re-adding it.
+        SessionWindowHandoff.prepare(browser, replacing: session)
+
+        #expect(browser.tabGroup === group)
+        #expect(group.selectedWindow === browser)
+        #expect(group.windows.count == 2)
+        #expect(browser.frame == session.frame)
+    }
+
     @Test func machineDetailsCanBeShownWithoutAnySessionWindows() {
         let browser = makeWindow()
         defer { browser.close() }
