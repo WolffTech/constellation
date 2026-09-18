@@ -196,6 +196,30 @@ struct SessionCoordinatorTests {
         #expect(coordinator.sessions.map(\.id) == [two, three, one])
     }
 
+    @Test func nativeTabOrderPersistsWithoutChangingTheSelectedSession() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let coordinator = SessionCoordinator(
+            library: library, prober: StubProber(), driver: StubSSHDriver(),
+            localDriver: StubLocalTerminalDriver())
+        let ids = (0..<3).map { _ in SessionID() }
+        coordinator.restoreWorkspace(from: MachineLibrarySnapshot(workspaceTabs: ids.enumerated().map { index, id in
+            WorkspaceTab(id: id, target: .local, title: "Terminal \(index)", position: index, isSelected: index == 2)
+        }))
+
+        // AppKit can briefly report incomplete membership while moving a tab.
+        coordinator.reorderSessions([ids[0], ids[1]])
+        #expect(coordinator.sessions.map(\.id) == ids)
+        coordinator.reorderSessions([ids[2], ids[0], ids[1]])
+        #expect(coordinator.selectedSessionID == ids[2])
+        try await coordinator.persistWorkspace()
+
+        let snapshot = try await library.snapshot()
+        #expect(snapshot.workspaceTabs.map(\.id) == [ids[2], ids[0], ids[1]])
+        #expect(snapshot.workspaceTabs.map(\.isSelected) == [true, false, false])
+        coordinator.select(number: 2)
+        #expect(coordinator.selectedSessionID == ids[0])
+    }
+
     @Test func backgroundTerminalBellNeedsAttentionUntilSelected() async throws {
         let library = try GRDBMachineLibrary.inMemory()
         let localDriver = StubLocalTerminalDriver()
