@@ -132,10 +132,7 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
     private func applyTabOrder(_ orderedIDs: [SessionID]) {
         guard let anchor = orderedWindows.first,
               let group = anchor.tabGroup else { return }
-        for (index, id) in orderedIDs.enumerated() {
-            guard let window = windows[id], group.windows[safe: index] !== window else { continue }
-            group.insertWindow(window, at: index)
-        }
+        SessionWindowTabOrder.apply(orderedIDs.compactMap { windows[$0] }, to: group)
     }
 
     private func storeTabOrder(_ ids: [SessionID]) {
@@ -187,7 +184,7 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         selectedWindowObservation = group.observe(\.selectedWindow, options: [.new]) { [weak self] group, _ in
             let id = (group.selectedWindow as? SessionWindow)?.sessionID
             MainActor.assumeIsolated {
-                guard let self, let id else { return }
+                guard let self, !self.isReconciling, let id else { return }
                 self.root?.sessions?.select(id)
             }
         }
@@ -210,6 +207,25 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
             parts.append("\(facts.host):\(facts.port)")
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+@MainActor
+enum SessionWindowTabOrder {
+    static func apply(_ windows: [NSWindow], to group: NSWindowTabGroup) {
+        let selectedWindow = group.selectedWindow
+        for (index, window) in windows.enumerated() {
+            guard group.windows[safe: index] !== window else { continue }
+            // Reinserting an existing member without removing it first can leave
+            // stale tab-bar items that crash a later browser window handoff.
+            if group.windows.contains(where: { $0 === window }) {
+                group.removeWindow(window)
+            }
+            group.insertWindow(window, at: index)
+        }
+        if let selectedWindow, group.windows.contains(where: { $0 === selectedWindow }) {
+            group.selectedWindow = selectedWindow
+        }
     }
 }
 

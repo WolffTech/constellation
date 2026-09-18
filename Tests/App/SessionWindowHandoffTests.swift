@@ -6,7 +6,71 @@ import Testing
 @testable import Constellation
 
 @MainActor
+@Suite(.serialized)
 struct SessionWindowHandoffTests {
+    @Test func reorderedSessionCanReturnToMachineDetailsRepeatedly() throws {
+        let browser = makeWindow()
+        let session = makeWindow()
+        defer { [browser, session].forEach { $0.close() } }
+
+        browser.makeKeyAndOrderFront(nil)
+        SessionWindowHandoff.prepare(session, replacing: browser)
+        let group = try #require(session.tabGroup)
+        SessionWindowTabOrder.apply([session], to: group)
+        session.makeKeyAndOrderFront(nil)
+        if !group.isTabBarVisible {
+            session.toggleTabBar(nil)
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        for _ in 0..<3 {
+            group.selectedWindow = session
+            session.makeKeyAndOrderFront(nil)
+            SessionWindowTabOrder.apply([session], to: group)
+            #expect(group.windows == [session, browser])
+            #expect(group.selectedWindow === session)
+            browser.orderOut(nil)
+            #expect(!browser.isVisible)
+            #expect(group.windows == [session])
+
+            SessionWindowHandoff.showBrowser(browser, alongside: session)
+            #expect(browser.tabGroup === group)
+            #expect(group.windows == [session, browser])
+            #expect(group.selectedWindow === browser)
+            #expect(browser.isVisible)
+        }
+    }
+
+    @Test func reorderingSessionsPreservesSelectionAndAllowsBrowserHandoffs() throws {
+        let browser = makeWindow()
+        let first = makeWindow()
+        let second = makeWindow()
+        defer { [browser, first, second].forEach { $0.close() } }
+
+        browser.makeKeyAndOrderFront(nil)
+        SessionWindowHandoff.prepare(first, replacing: browser)
+        first.addTabbedWindow(second, ordered: .above)
+        let group = try #require(first.tabGroup)
+        group.selectedWindow = second
+        second.makeKeyAndOrderFront(nil)
+        if !group.isTabBarVisible {
+            second.toggleTabBar(nil)
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        for order in [[second, first], [first, second], [second, first]] {
+            SessionWindowTabOrder.apply(order, to: group)
+            #expect(group.windows == order + [browser])
+            #expect(group.selectedWindow === second)
+            browser.orderOut(nil)
+            #expect(group.windows == order)
+            SessionWindowHandoff.showBrowser(browser, alongside: order.last)
+            #expect(group.windows == order + [browser])
+            #expect(group.selectedWindow === browser)
+            group.selectedWindow = second
+        }
+    }
+
     @Test func machineDetailsReturnToTheExistingSessionTabGroup() throws {
         let browser = makeWindow()
         let first = makeWindow()
