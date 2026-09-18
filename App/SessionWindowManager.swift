@@ -16,11 +16,23 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
     private weak var observedTabGroup: NSWindowTabGroup?
     private var tabWindowsObservation: NSKeyValueObservation?
     private var selectedWindowObservation: NSKeyValueObservation?
+    private var reconciledSessionIDs: [SessionID] = []
 
-    func update(browserWindow: NSWindow, sessions: [SessionSummary], selectedSessionID: SessionID?) {
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(synchronizeNativeTabOrder),
+            name: NSApplication.didUpdateNotification, object: nil)
+    }
+
+    func update(browserWindow: NSWindow) {
+        // A native drag can reorder tabs without notifying observers of `windows`.
+        synchronizeNativeTabOrder()
+        guard let coordinator = root?.sessions else { return }
         self.browserWindow = browserWindow
-        reconcile(sessions: sessions)
+        reconcile(sessions: coordinator.sessions)
 
+        let selectedSessionID = coordinator.selectedSessionID
         if let selectedSessionID, let window = windows[selectedSessionID] {
             select(window)
             browserWindow.orderOut(nil)
@@ -82,6 +94,7 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         }
 
         applyTabOrder(sessions.map(\.id))
+        reconciledSessionIDs = sessions.map(\.id)
         observeTabGroupIfNeeded()
 
         if sessions.isEmpty {
@@ -132,15 +145,20 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
     private func applyTabOrder(_ orderedIDs: [SessionID]) {
         guard let anchor = orderedWindows.first,
               let group = anchor.tabGroup else { return }
-        for (index, id) in orderedIDs.enumerated() {
-            guard let window = windows[id], group.windows[safe: index] !== window else { continue }
-            group.insertWindow(window, at: index)
-        }
+        SessionWindowTabOrder.apply(orderedIDs.compactMap { windows[$0] }, to: group)
     }
 
     private func storeTabOrder(_ ids: [SessionID]) {
-        guard !isReconciling, let sessions = root?.sessions else { return }
+        guard !isReconciling, let sessions = root?.sessions,
+              sessions.sessions.map(\.id) == reconciledSessionIDs else { return }
         sessions.reorderSessions(ids)
+        reconciledSessionIDs = sessions.sessions.map(\.id)
+    }
+
+    @objc private func synchronizeNativeTabOrder() {
+        guard let group = observedTabGroup else { return }
+        // Do not overwrite a model-driven reorder that has not reached AppKit yet.
+        storeTabOrder(group.windows.compactMap { ($0 as? SessionWindow)?.sessionID })
     }
 
     private func select(_ window: NSWindow) {
@@ -187,7 +205,7 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         selectedWindowObservation = group.observe(\.selectedWindow, options: [.new]) { [weak self] group, _ in
             let id = (group.selectedWindow as? SessionWindow)?.sessionID
             MainActor.assumeIsolated {
-                guard let self, let id else { return }
+                guard let self, !self.isReconciling, let id else { return }
                 self.root?.sessions?.select(id)
             }
         }
@@ -210,6 +228,25 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
             parts.append("\(facts.host):\(facts.port)")
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+@MainActor
+enum SessionWindowTabOrder {
+    static func apply(_ windows: [NSWindow], to group: NSWindowTabGroup) {
+        let selectedWindow = group.selectedWindow
+        for (index, window) in windows.enumerated() {
+            guard group.windows[safe: index] !== window else { continue }
+            // Reinserting an existing member without removing it first can leave
+            // stale tab-bar items that crash a later browser window handoff.
+            if group.windows.contains(where: { $0 === window }) {
+                group.removeWindow(window)
+            }
+            group.insertWindow(window, at: index)
+        }
+        if let selectedWindow, group.windows.contains(where: { $0 === selectedWindow }) {
+            group.selectedWindow = selectedWindow
+        }
     }
 }
 
@@ -400,10 +437,9 @@ struct SessionWindowBridge: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {
         DispatchQueue.main.async {
             guard let window = view.window else { return }
-            root.sessionWindows.update(
-                browserWindow: window,
-                sessions: sessions,
-                selectedSessionID: selectedSessionID)
+            // Read the coordinator when this runs, rather than replaying a snapshot
+            // captured before a native selection or reorder.
+            root.sessionWindows.update(browserWindow: window)
         }
     }
 }
