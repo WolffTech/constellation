@@ -49,7 +49,10 @@ struct MachineDraft: Equatable {
         }
         rdpProfiles = snapshot.profiles(for: machine.id).compactMap { profile in
             guard case .rdp(let rdp) = profile else { return nil }
-            return RDPProfileDraft(profile: rdp, credential: rdp.credentialID.flatMap(snapshot.credential))
+            return RDPProfileDraft(
+                profile: rdp,
+                credential: rdp.credentialID.flatMap(snapshot.credential),
+                gatewayCredential: rdp.gateway?.credentialID.flatMap(snapshot.credential))
         }
         isNew = false
     }
@@ -70,7 +73,12 @@ struct MachineDraft: Equatable {
                   let id = draft.profile.credentialID else { return nil }
             return PendingSecret(credentialID: id, secret: Secret(secret))
         }
-        return ssh + vnc + rdp
+        let gateway = rdpProfiles.compactMap { draft -> PendingSecret? in
+            guard let secret = draft.gateway.enteredSecret, !secret.isEmpty,
+                  let id = draft.gateway.resolved()?.credentialID else { return nil }
+            return PendingSecret(credentialID: id, secret: Secret(secret))
+        }
+        return ssh + vnc + rdp + gateway
     }
 
     /// Every profile id in editor order: SSH, then VNC, then RDP.
@@ -116,6 +124,7 @@ struct MachineDraft: Equatable {
             vncProfiles.remove(at: index)
         } else if let index = rdpProfiles.firstIndex(where: { $0.profile.id == id }) {
             if let credential = rdpProfiles[index].profile.credentialID { removedCredentialIDs.insert(credential) }
+            if let credential = rdpProfiles[index].gateway.credentialID { removedCredentialIDs.insert(credential) }
             rdpProfiles.remove(at: index)
         } else {
             return
@@ -159,13 +168,17 @@ struct MachineDraft: Equatable {
             if let credential = draft.resolvedCredential(machineName: machine.name) {
                 changes.append(.upsertCredential(credential))
             }
+            if let credential = draft.resolvedGatewayCredential(machineName: machine.name) {
+                changes.append(.upsertCredential(credential))
+            }
             changes.append(.upsertProfile(.rdp(profile)))
         }
         changes += removedProfileIDs.map { .deleteProfile($0) }
         let keptCredentials = Set(
             profiles.compactMap(\.profile.credentialID)
                 + vncProfiles.compactMap(\.profile.credentialID)
-                + rdpProfiles.compactMap(\.profile.credentialID))
+                + rdpProfiles.compactMap(\.profile.credentialID)
+                + rdpProfiles.compactMap(\.gateway.credentialID))
         changes += removedCredentialIDs.subtracting(keptCredentials).map { .deleteCredential($0) }
 
         let change = MachineLibraryChange.batch(changes)
@@ -373,10 +386,72 @@ struct VNCProfileDraft: Identifiable, Equatable {
     }
 }
 
+/// An RDP profile's gateway under edit. The fields outlive the switch so
+/// turning the gateway back on restores what was typed; `resolved()` is what
+/// gets saved.
+struct RDPGatewayDraft: Equatable {
+    var isEnabled: Bool
+    var host: String
+    var port: Int
+    var usesDesktopAccount: Bool
+    var username: String
+    var domain: String
+    var credentialID: CredentialID?
+    var enteredSecret: String? {
+        didSet {
+            if let entered = enteredSecret, !entered.isEmpty, credentialID == nil {
+                credentialID = CredentialID()
+            }
+        }
+    }
+    var existingCredentialLabel: String?
+
+    init(gateway: RDPGateway? = nil, credential: CredentialReference? = nil) {
+        isEnabled = gateway != nil
+        host = gateway?.host ?? ""
+        port = gateway?.port ?? RDPGateway.defaultPort
+        if case .separate(let username, let domain, let credentialID) = gateway?.credentials {
+            usesDesktopAccount = false
+            self.username = username ?? ""
+            self.domain = domain ?? ""
+            self.credentialID = credentialID
+        } else {
+            usesDesktopAccount = true
+            username = ""
+            domain = ""
+        }
+        existingCredentialLabel = credential?.label
+    }
+
+    var hasStoredSecret: Bool { existingCredentialLabel != nil && credentialID != nil }
+
+    mutating func removeStoredSecret() {
+        credentialID = nil
+        existingCredentialLabel = nil
+        enteredSecret = nil
+    }
+
+    func resolved() -> RDPGateway? {
+        guard isEnabled else { return nil }
+        let host = host.trimmingCharacters(in: .whitespaces)
+        guard !usesDesktopAccount else { return RDPGateway(host: host, port: port) }
+        let username = username.trimmingCharacters(in: .whitespaces)
+        let domain = domain.trimmingCharacters(in: .whitespaces)
+        let hasSecret = hasStoredSecret || enteredSecret?.isEmpty == false
+        return RDPGateway(host: host, port: port, credentials: .separate(
+            username: username.isEmpty ? nil : username,
+            domain: domain.isEmpty ? nil : domain,
+            credentialID: hasSecret ? credentialID : nil))
+    }
+}
+
 /// One RDP profile under edit. Username and domain are optional: NLA needs
-/// them, so whatever is missing is asked for at connect time.
+/// them, so whatever is missing is asked for at connect time. The same goes
+/// for a gateway with its own account.
 struct RDPProfileDraft: Identifiable, Equatable {
     var profile: RDPProfile
+    /// Edited here rather than in `profile.gateway`, which `resolvedProfile()` fills in.
+    var gateway: RDPGatewayDraft
     var enteredSecret: String? {
         didSet {
             if let entered = enteredSecret, !entered.isEmpty, profile.credentialID == nil {
@@ -387,8 +462,9 @@ struct RDPProfileDraft: Identifiable, Equatable {
     var existingCredentialLabel: String?
     var id: ProfileID { profile.id }
 
-    init(profile: RDPProfile, credential: CredentialReference? = nil) {
+    init(profile: RDPProfile, credential: CredentialReference? = nil, gatewayCredential: CredentialReference? = nil) {
         self.profile = profile
+        gateway = RDPGatewayDraft(gateway: profile.gateway, credential: gatewayCredential)
         existingCredentialLabel = credential?.label
     }
 
@@ -409,11 +485,17 @@ struct RDPProfileDraft: Identifiable, Equatable {
         if profile.domain?.isEmpty == true { profile.domain = nil }
         let hasSecret = hasStoredSecret || enteredSecret?.isEmpty == false
         if !hasSecret { profile.credentialID = nil }
+        profile.gateway = gateway.resolved()
         return profile
     }
 
     func resolvedCredential(machineName: String) -> CredentialReference? {
         guard enteredSecret?.isEmpty == false, let id = resolvedProfile().credentialID else { return nil }
         return CredentialReference(id: id, label: "\(machineName) · \(resolvedProfile().name) RDP password", kind: .password)
+    }
+
+    func resolvedGatewayCredential(machineName: String) -> CredentialReference? {
+        guard gateway.enteredSecret?.isEmpty == false, let id = gateway.resolved()?.credentialID else { return nil }
+        return CredentialReference(id: id, label: "\(machineName) · \(resolvedProfile().name) RDP gateway password", kind: .password)
     }
 }

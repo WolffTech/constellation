@@ -539,6 +539,30 @@ private struct RDPProfileForm: View {
             } footer: {
                 Text("Connects with Network Level Authentication over TLS. The server's certificate is shown for approval on first use.")
             }
+            Section {
+                Toggle("Connect through an RD Gateway", isOn: $draft.gateway.isEnabled)
+                if draft.gateway.isEnabled {
+                    TextField("Gateway", text: $draft.gateway.host, prompt: Text("gateway.example.com"))
+                    TextField("Gateway port", value: $draft.gateway.port, format: .number.grouping(.never), prompt: Text("443"))
+                    Toggle("Sign in to the gateway with the account above", isOn: $draft.gateway.usesDesktopAccount)
+                    if !draft.gateway.usesDesktopAccount {
+                        TextField("Gateway username", text: $draft.gateway.username, prompt: Text("Asked when connecting if empty"))
+                        TextField("Gateway domain", text: $draft.gateway.domain, prompt: Text("Optional"))
+                        SecretRow(
+                            title: "Gateway password",
+                            prompt: "Optional; asked when connecting if empty",
+                            hasStoredSecret: draft.gateway.hasStoredSecret,
+                            enteredSecret: $draft.gateway.enteredSecret,
+                            onRemoveStored: { draft.gateway.removeStoredSecret() })
+                    }
+                }
+            } header: {
+                Text("Gateway")
+            } footer: {
+                if draft.gateway.isEnabled {
+                    Text("The session is tunnelled over HTTPS to the gateway, which connects to this machine's address on its own network. The address does not need to be reachable from this Mac.")
+                }
+            }
         }
         .formStyle(.grouped)
     }
