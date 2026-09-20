@@ -57,7 +57,7 @@ xcodegen generate
 open Constellation.xcodeproj
 ```
 
-The build scripts download the pinned Zig and OpenSSL versions, then compile the pinned Ghostty and FreeRDP versions.
+The build scripts download the pinned Zig, OpenSSL and cJSON versions, then compile the pinned Ghostty and FreeRDP versions.
 
 Forks that distribute their own builds must replace `SUFeedURL` and `SUPublicEDKey` in `project.yml`. Otherwise, those builds will check Constellation's official update feed and trust its release signatures.
 
