@@ -25,6 +25,28 @@ struct MachineExportTests {
         #expect(json.contains("192.0.2.18"))
     }
 
+    @Test func exportDropsTheGatewayCredentialButKeepsTheGateway() throws {
+        let machine = Machine(name: "win")
+        let credential = CredentialReference(label: "gateway", kind: .password)
+        let gateway = RDPGateway(host: "gw.example.com", credentials: .separate(username: "dmz-nick", domain: "DMZ", credentialID: credential.id))
+        let profile = ConnectionProfile.rdp(RDPProfile(machineID: machine.id, gateway: gateway))
+        #expect(profile.credentialIDs == [credential.id])
+
+        guard case .rdp(let exported) = profile.withoutCredential() else {
+            Issue.record("expected an RDP profile")
+            return
+        }
+        #expect(exported.gateway == RDPGateway(host: "gw.example.com", credentials: .separate(username: "dmz-nick", domain: "DMZ", credentialID: nil)))
+    }
+
+    @Test func rdpProfilesSavedBeforeGatewaysStillDecode() throws {
+        let profile = RDPProfile(machineID: MachineID(), username: "nick")
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(profile)) as? [String: Any])
+        json["gateway"] = nil
+        let decoded = try JSONDecoder().decode(RDPProfile.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(decoded == profile)
+    }
+
     @Test func importRoundTripsDefinitions() throws {
         let (snapshot, _) = sampleSnapshot()
         let data = try MachineExport.encode(MachineExport.document(from: snapshot))

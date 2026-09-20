@@ -33,6 +33,17 @@ struct ValidatorTests {
         #expect(throws: Never.self) { try Validator.validatePort(22) }
     }
 
+    @Test func gatewaysNeedAValidHostAndPort() {
+        let machine = Machine(name: "win")
+        func profile(_ gateway: RDPGateway) -> ConnectionProfile {
+            .rdp(RDPProfile(machineID: machine.id, name: "Office", gateway: gateway))
+        }
+        #expect(throws: ValidationError.missingGatewayHost(profile: "Office")) { try Validator.validate(profile(RDPGateway(host: " "))) }
+        #expect(throws: ValidationError.invalidHost("gw:443")) { try Validator.validate(profile(RDPGateway(host: "gw:443"))) }
+        #expect(throws: ValidationError.invalidPort(0)) { try Validator.validate(profile(RDPGateway(host: "gw.example.com", port: 0))) }
+        #expect(throws: Never.self) { try Validator.validate(profile(RDPGateway(host: "gw.example.com"))) }
+    }
+
     @Test func passwordProfilesNeedACredential() {
         let machine = Machine(name: "box")
         let profile = SSHProfile(machineID: machine.id, name: "Admin", authentication: .password)
