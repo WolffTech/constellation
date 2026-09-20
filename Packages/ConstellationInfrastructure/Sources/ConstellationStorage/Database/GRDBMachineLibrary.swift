@@ -284,10 +284,8 @@ public final class GRDBMachineLibrary: MachineLibrary, Sendable {
         if case .pinned(let id) = profile.addressSelection, !addressIDs.contains(id) {
             result = result.withAddressSelection(.automatic)
         }
-        if let credential = profile.credentialID, !credentialIDs.contains(credential) {
-            result = result.withoutCredential()
-        }
-        return result
+        // The gateway's reference lives only in the JSON, so SQLite never nulls it.
+        return result.removingCredentials { !credentialIDs.contains($0) }
     }
 
     private static func id<T>(_ type: TypedID<T>.Type, _ value: String, table: String) throws -> TypedID<T> {
