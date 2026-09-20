@@ -94,6 +94,25 @@ typedef struct {
     bool gateway; // presented by the RD Gateway rather than the desktop
 } crdp_certificate;
 
+typedef enum {
+    CRDP_CURSOR_DEFAULT = 0, // the platform arrow
+    CRDP_CURSOR_HIDDEN,
+    CRDP_CURSOR_IMAGE,
+} crdp_cursor_kind;
+
+/// A cursor shape the server wants shown over the desktop. `pixels` is valid
+/// only for the duration of the `cursor_changed` call.
+typedef struct {
+    crdp_cursor_kind kind;
+    /// `CRDP_CURSOR_IMAGE` only: `width * height * 4` bytes of BGRA with
+    /// straight (non-premultiplied) alpha, in remote pixels.
+    const uint8_t *pixels;
+    uint32_t width;
+    uint32_t height;
+    uint32_t hotspot_x; // from the image's top-left
+    uint32_t hotspot_y;
+} crdp_cursor;
+
 /// FreeRDP calls these from the client thread. `context` is the opaque pointer
 /// passed to `crdp_session_create`.
 typedef struct {
@@ -113,6 +132,8 @@ typedef struct {
     /// The remote clipboard now holds this UTF-8 text. Only fires with
     /// `share_clipboard`; the string is valid for the duration of the call.
     void (*clipboard_text)(void *context, const char *utf8);
+    /// The server changed the cursor shape.
+    void (*cursor_changed)(void *context, const crdp_cursor *cursor);
 } crdp_callbacks;
 
 /// Builds a session. Copies `config` and `callbacks`; both may be freed after.

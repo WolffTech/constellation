@@ -136,7 +136,8 @@ public final class RDPSession: RemoteDesktopSession {
             frame_resized: rdpFrameResized,
             frame_updated: rdpFrameUpdated,
             verify_certificate: rdpVerifyCertificate,
-            clipboard_text: rdpClipboardText)
+            clipboard_text: rdpClipboardText,
+            cursor_changed: rdpCursorChanged)
 
         let gateway = configuration.gateway
         var gatewayUsername: String?
@@ -228,6 +229,10 @@ public final class RDPSession: RemoteDesktopSession {
 
     fileprivate func clipboardTextReceived(_ text: String) {
         clipboard?.receive(remoteText: text)
+    }
+
+    fileprivate func cursorChanged(_ shape: RDPCursorShape) {
+        surface.cursorShape = shape
     }
 
     // MARK: Clipboard
@@ -422,6 +427,14 @@ private func rdpClipboardText(_ context: UnsafeMutableRawPointer?, _ utf8: Unsaf
     let text = String(cString: utf8) // copied; the C string dies with the call
     Task { @MainActor in
         callbackContext.session?.clipboardTextReceived(text)
+    }
+}
+
+private func rdpCursorChanged(_ context: UnsafeMutableRawPointer?, _ cursor: UnsafePointer<crdp_cursor>?) {
+    guard let callbackContext = callbackContext(from: context), let cursor else { return }
+    let shape = RDPCursorShape(cursor.pointee) // copied; the pixels die with the call
+    Task { @MainActor in
+        callbackContext.session?.cursorChanged(shape)
     }
 }
 
