@@ -22,6 +22,8 @@ public struct RDPSessionConfiguration: Sendable, Equatable {
     /// both ways. Files and images are not shared.
     public var sharesClipboard: Bool
     public var connectionQuality: RDPConnectionQuality
+    /// `nil` connects directly.
+    public var gateway: RDPGatewayConfiguration?
 
     public init(
         host: String,
@@ -32,7 +34,8 @@ public struct RDPSessionConfiguration: Sendable, Equatable {
         height: Int = 800,
         dynamicResolution: Bool = true,
         sharesClipboard: Bool = false,
-        connectionQuality: RDPConnectionQuality = .automatic
+        connectionQuality: RDPConnectionQuality = .automatic,
+        gateway: RDPGatewayConfiguration? = nil
     ) {
         self.host = host
         self.port = port
@@ -43,6 +46,28 @@ public struct RDPSessionConfiguration: Sendable, Equatable {
         self.dynamicResolution = dynamicResolution
         self.sharesClipboard = sharesClipboard
         self.connectionQuality = connectionQuality
+        self.gateway = gateway
+    }
+}
+
+/// An RD Gateway to tunnel the session through over HTTPS. The gateway, not
+/// this Mac, resolves the session's `host`.
+public struct RDPGatewayConfiguration: Sendable, Equatable {
+    public enum Account: Sendable, Equatable {
+        /// The desktop's username, domain and password also open the gateway.
+        case sameAsDesktop
+        /// The password comes from the session's gateway password provider.
+        case separate(username: String, domain: String?)
+    }
+
+    public var host: String
+    public var port: Int
+    public var account: Account
+
+    public init(host: String, port: Int = 443, account: Account = .sameAsDesktop) {
+        self.host = host
+        self.port = port
+        self.account = account
     }
 }
 
@@ -70,8 +95,11 @@ public struct RDPCertificate: Sendable, Equatable {
     public var fingerprint: String
     public var hostMismatch: Bool
     public var changed: Bool
+    /// Presented by the RD Gateway rather than the desktop; `host` and `port`
+    /// are then the gateway's.
+    public var isGateway: Bool
 
-    public init(host: String, port: Int, commonName: String, subject: String, issuer: String, fingerprint: String, hostMismatch: Bool, changed: Bool) {
+    public init(host: String, port: Int, commonName: String, subject: String, issuer: String, fingerprint: String, hostMismatch: Bool, changed: Bool, isGateway: Bool = false) {
         self.host = host
         self.port = port
         self.commonName = commonName
@@ -80,6 +108,7 @@ public struct RDPCertificate: Sendable, Equatable {
         self.fingerprint = fingerprint
         self.hostMismatch = hostMismatch
         self.changed = changed
+        self.isGateway = isGateway
     }
 }
 

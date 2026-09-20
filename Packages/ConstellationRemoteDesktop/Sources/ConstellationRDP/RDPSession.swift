@@ -22,6 +22,7 @@ public final class RDPSession: RemoteDesktopSession {
 
     public let configuration: RDPSessionConfiguration
     private let passwordProvider: RDPPasswordProvider
+    private let gatewayPasswordProvider: RDPPasswordProvider?
     private let verifier: RDPCertificateVerifier
     private let host: RDPHostView
     private let surface = RDPSurfaceView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
@@ -57,10 +58,12 @@ public final class RDPSession: RemoteDesktopSession {
     public init(
         configuration: RDPSessionConfiguration,
         password: @escaping RDPPasswordProvider,
+        gatewayPassword: RDPPasswordProvider? = nil,
         verifyCertificate: @escaping RDPCertificateVerifier
     ) {
         self.configuration = configuration
         self.passwordProvider = password
+        self.gatewayPasswordProvider = gatewayPassword
         self.verifier = verifyCertificate
         clipboard = configuration.sharesClipboard ? RDPClipboardSync() : nil
         host = RDPHostView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
@@ -83,8 +86,9 @@ public final class RDPSession: RemoteDesktopSession {
         connectTask = Task { [weak self] in
             guard let self else { return }
             let password = await self.passwordProvider()
+            let gatewayPassword = await self.gatewayPasswordProvider?()
             if Task.isCancelled { return }
-            self.startSession(password: password)
+            self.startSession(password: password, gatewayPassword: gatewayPassword)
             self.connectTask = nil
         }
     }
@@ -123,7 +127,7 @@ public final class RDPSession: RemoteDesktopSession {
 
     // MARK: Session start
 
-    private func startSession(password: String?) {
+    private func startSession(password: String?, gatewayPassword: String?) {
         let callbackContext = RDPCallbackContext(session: self)
         self.callbackContext = callbackContext
         let callbacks = crdp_callbacks(
@@ -134,30 +138,43 @@ public final class RDPSession: RemoteDesktopSession {
             verify_certificate: rdpVerifyCertificate,
             clipboard_text: rdpClipboardText)
 
-        // The password is copied into FreeRDP's settings and this stack frame
-        // is the only other place it lives.
-        configuration.host.withCString { hostPtr in
-            withOptionalCString(configuration.username) { userPtr in
-                withOptionalCString(configuration.domain) { domainPtr in
-                    withOptionalCString(password) { passwordPtr in
-                        let initial = pixelSize(for: CGSize(width: max(1, configuration.width), height: max(1, configuration.height)))
-                        var config = crdp_config(
-                            host: hostPtr,
-                            port: UInt32(max(0, configuration.port)),
-                            username: userPtr,
-                            domain: domainPtr,
-                            password: passwordPtr,
-                            width: UInt32(max(2, initial.width)),
-                            height: UInt32(max(1, initial.height)),
-                            scale_percent: scalePercent,
-                            dynamic_resolution: configuration.dynamicResolution,
-                            share_clipboard: configuration.sharesClipboard,
-                            connection_type: configuration.connectionQuality.bridgeValue)
-                        var callbacksCopy = callbacks
-                        handle = crdp_session_create(&config, &callbacksCopy)
-                    }
-                }
-            }
+        let gateway = configuration.gateway
+        var gatewayUsername: String?
+        var gatewayDomain: String?
+        if case .separate(let username, let domain) = gateway?.account {
+            gatewayUsername = username
+            gatewayDomain = domain
+        }
+        let usesDesktopAccount = gateway?.account == .sameAsDesktop
+
+        // The passwords are copied into FreeRDP's settings and this stack frame
+        // is the only other place they live.
+        let strings = [
+            configuration.host, configuration.username, configuration.domain, password,
+            gateway?.host, gatewayUsername, gatewayDomain, gatewayPassword,
+        ]
+        withOptionalCStrings(strings) { ptrs in
+            let initial = pixelSize(for: CGSize(width: max(1, configuration.width), height: max(1, configuration.height)))
+            var config = crdp_config(
+                host: ptrs[0],
+                port: UInt32(max(0, configuration.port)),
+                username: ptrs[1],
+                domain: ptrs[2],
+                password: ptrs[3],
+                width: UInt32(max(2, initial.width)),
+                height: UInt32(max(1, initial.height)),
+                scale_percent: scalePercent,
+                dynamic_resolution: configuration.dynamicResolution,
+                share_clipboard: configuration.sharesClipboard,
+                connection_type: configuration.connectionQuality.bridgeValue,
+                gateway_host: ptrs[4],
+                gateway_port: UInt32(max(0, gateway?.port ?? 0)),
+                gateway_use_same_credentials: usesDesktopAccount,
+                gateway_username: ptrs[5],
+                gateway_domain: ptrs[6],
+                gateway_password: ptrs[7])
+            var callbacksCopy = callbacks
+            handle = crdp_session_create(&config, &callbacksCopy)
         }
 
         guard handle != nil else {
@@ -299,6 +316,7 @@ public final class RDPSession: RemoteDesktopSession {
     static let dnsFailureMessage = "The server could not be found."
     static let tlsFailureMessage = "The secure connection could not be established."
     static let connectFailureMessage = "The connection to the server did not complete."
+    static let gatewayFailureMessage = "The gateway refused the connection. Your account may not be allowed to use this gateway or reach this computer through it."
     static let genericFailureMessage = "The connection ended unexpectedly."
 
     /// Maps the bridge's failure class. Clean closes and user cancellations
@@ -315,6 +333,8 @@ public final class RDPSession: RemoteDesktopSession {
             return RemoteDesktopSessionFailure(message: tlsFailureMessage)
         case CRDP_FAILURE_CONNECT:
             return RemoteDesktopSessionFailure(message: connectFailureMessage)
+        case CRDP_FAILURE_GATEWAY:
+            return RemoteDesktopSessionFailure(message: gatewayFailureMessage)
         default:
             return RemoteDesktopSessionFailure(message: genericFailureMessage)
         }
@@ -351,6 +371,15 @@ private enum RDPWire {
 private func withOptionalCString<Result>(_ string: String?, _ body: (UnsafePointer<CChar>?) -> Result) -> Result {
     guard let string else { return body(nil) }
     return string.withCString(body)
+}
+
+/// `withOptionalCString` over a list; `body` sees one pointer per string, in order.
+private func withOptionalCStrings<Result>(_ strings: [String?], _ body: ([UnsafePointer<CChar>?]) -> Result) -> Result {
+    func bind(_ index: Int, _ pointers: [UnsafePointer<CChar>?]) -> Result {
+        guard index < strings.count else { return body(pointers) }
+        return withOptionalCString(strings[index]) { bind(index + 1, pointers + [$0]) }
+    }
+    return bind(0, [])
 }
 
 // MARK: - C callback trampolines
@@ -416,7 +445,8 @@ private func rdpVerifyCertificate(_ context: UnsafeMutableRawPointer?, _ certifi
         issuer: cert.issuer.map(String.init(cString:)) ?? "",
         fingerprint: cert.fingerprint.map(String.init(cString:)) ?? "",
         hostMismatch: cert.host_mismatch,
-        changed: cert.changed)
+        changed: cert.changed,
+        isGateway: cert.gateway)
 
     guard let callbackContext = callbackContext(from: context) else { return CRDP_CERT_REJECT }
     let verdictBox = VerdictBox()

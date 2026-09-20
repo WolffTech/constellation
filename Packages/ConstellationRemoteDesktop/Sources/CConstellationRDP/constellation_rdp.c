@@ -212,7 +212,16 @@ static char *dup_or_null(const char *value) {
     return copy;
 }
 
+// RD Gateway HRESULTs (E_PROXY_*, MS-TSGU 2.2.6): the gateway's connection or
+// resource authorization policy refused the tunnel, or it could not reach the
+// desktop. FreeRDP keeps the names in a private header.
+static bool crdp_is_gateway_error(UINT32 error) {
+    return error >= 0x800759D8u && error <= 0x80075A00u;
+}
+
 static crdp_failure map_failure(UINT32 error) {
+    if (crdp_is_gateway_error(error))
+        return CRDP_FAILURE_GATEWAY;
     switch (error) {
         case FREERDP_ERROR_SUCCESS:
             return CRDP_FAILURE_NONE;
@@ -587,6 +596,7 @@ static crdp_cert_verdict crdp_ask_certificate(freerdp *instance, const char *hos
         .fingerprint = fingerprint,
         .host_mismatch = (flags & VERIFY_CERT_FLAG_MISMATCH) != 0,
         .changed = changed || (flags & VERIFY_CERT_FLAG_CHANGED) != 0,
+        .gateway = (flags & VERIFY_CERT_FLAG_GATEWAY) != 0,
     };
     return session->callbacks.verify_certificate(session->callbacks.context, &certificate);
 }
@@ -819,6 +829,38 @@ crdp_session *crdp_session_create(const crdp_config *config, const crdp_callback
         freerdp_settings_set_string(settings, FreeRDP_Password, session->password);
         freerdp_settings_set_bool(settings, FreeRDP_AutoLogonEnabled, TRUE);
     }
+    // Same settings as xfreerdp's /gateway. FreeRDP tries the HTTP transport
+    // (WebSocket first) and falls back to RPC-over-HTTP for older gateways.
+    // The strings are copied into settings here, so the session keeps none.
+    if (config->gateway_host) {
+        freerdp_settings_set_string(settings, FreeRDP_GatewayHostname, config->gateway_host);
+        freerdp_settings_set_uint32(settings, FreeRDP_GatewayPort,
+                                    config->gateway_port ? config->gateway_port : 443);
+        freerdp_settings_set_bool(settings, FreeRDP_GatewayUseSameCredentials,
+                                  config->gateway_use_same_credentials);
+        if (config->gateway_use_same_credentials) {
+            if (session->username)
+                freerdp_settings_set_string(settings, FreeRDP_GatewayUsername, session->username);
+            if (session->domain)
+                freerdp_settings_set_string(settings, FreeRDP_GatewayDomain, session->domain);
+            if (session->password)
+                freerdp_settings_set_string(settings, FreeRDP_GatewayPassword, session->password);
+        } else {
+            if (config->gateway_username)
+                freerdp_settings_set_string(settings, FreeRDP_GatewayUsername, config->gateway_username);
+            if (config->gateway_domain)
+                freerdp_settings_set_string(settings, FreeRDP_GatewayDomain, config->gateway_domain);
+            if (config->gateway_password)
+                freerdp_settings_set_string(settings, FreeRDP_GatewayPassword, config->gateway_password);
+        }
+        if (!freerdp_set_gateway_usage_method(settings, TSC_PROXY_MODE_DIRECT))
+            os_log_error(crdp_oslog(), "rdp gateway not enabled");
+    }
+    session->config.gateway_host = NULL;
+    session->config.gateway_username = NULL;
+    session->config.gateway_domain = NULL;
+    session->config.gateway_password = NULL;
+
     freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, config->width);
     freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, config->height);
     // The scale rides along in the initial monitor data so a Retina session
