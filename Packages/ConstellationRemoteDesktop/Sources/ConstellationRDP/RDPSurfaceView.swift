@@ -195,6 +195,19 @@ final class RDPSurfaceView: NSView {
     override func otherMouseDown(with event: NSEvent) { sendButton(event, button: .middle, down: true) }
     override func otherMouseUp(with event: NSEvent) { sendButton(event, button: .middle, down: false) }
 
+    /// Without this the view only hears about the pointer while a button is
+    /// down, so the desktop never sees a hover: no resize cursors at window
+    /// edges, no tooltips, no highlights.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil))
+    }
+
     override func mouseMoved(with event: NSEvent) { sendMove(event) }
     override func mouseDragged(with event: NSEvent) { sendMove(event) }
     override func rightMouseDragged(with event: NSEvent) { sendMove(event) }

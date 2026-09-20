@@ -44,6 +44,31 @@ struct RDPCursorTests {
         #expect(bitmap.colorAt(x: 1, y: 0)?.alphaComponent == 0)
     }
 
+    /// The server picks the cursor from where the pointer is, so it must hear
+    /// about hovering, not just clicks and drags.
+    @Test func forwardsHoverMovesToTheDesktop() throws {
+        let surface = RDPSurfaceView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        let pixels = [UInt8](repeating: 0, count: 200 * 200 * 4)
+        var moves: [RDPInputEvent] = []
+        surface.inputSink = { moves.append($0) }
+        surface.updateTrackingAreas()
+        #expect(surface.trackingAreas.contains { $0.options.contains(.mouseMoved) })
+
+        try pixels.withUnsafeBufferPointer { buffer in
+            surface.setFrameBuffer(try #require(buffer.baseAddress), width: 200, height: 200, stride: 800)
+            let event = try #require(NSEvent.mouseEvent(
+                with: .mouseMoved, location: NSPoint(x: 50, y: 75), modifierFlags: [], timestamp: 0,
+                windowNumber: 0, context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+            surface.mouseMoved(with: event)
+            surface.clear()
+        }
+        // The view is flipped and the desktop is twice its size.
+        guard case .pointerMove(x: 100, y: 50)? = moves.first else {
+            Issue.record("expected a pointer move, got \(moves)")
+            return
+        }
+    }
+
     @Test func rejectsATruncatedImage() {
         let image = RDPCursorImage(pixels: Data(count: 4), width: 2, height: 2, hotspot: .zero)
         #expect(image.makeCursor(pointsPerPixel: 1) == nil)
