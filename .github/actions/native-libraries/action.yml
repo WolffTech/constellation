@@ -10,8 +10,8 @@ description: >-
 inputs:
   use-cache:
     description: >-
-      Restore and save the built xcframeworks. Release builds pass "false" to
-      rebuild every native dependency from its pinned source.
+      Restore and save the built xcframeworks and corresponding source archives.
+      Set to "false" to rebuild every native dependency from its pinned source.
     default: "true"
 
 runs:
@@ -32,10 +32,13 @@ runs:
       if: inputs.use-cache == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
+        # Keep the source archives with the binaries for package-source.sh.
+        # v2 excludes older entries that contain only build outputs.
         path: |
           Vendor/ghostty/macos/GhosttyKit.xcframework
           Vendor/ghostty/zig-out/share
-        key: ghostty-${{ runner.arch }}-${{ steps.keys.outputs.xcode }}-${{ steps.keys.outputs.ghostty }}-${{ hashFiles('Scripts/build-libghostty.sh') }}
+          ~/.cache/zig/p/*.tar.gz
+        key: ghostty-v2-${{ runner.arch }}-${{ steps.keys.outputs.xcode }}-${{ steps.keys.outputs.ghostty }}-${{ hashFiles('Scripts/build-libghostty.sh') }}
 
     - name: Install Metal toolchain
       if: steps.ghostty.outputs.cache-hit != 'true'
@@ -52,8 +55,10 @@ runs:
       if: inputs.use-cache == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: Vendor/build/freerdp
-        key: freerdp-${{ runner.arch }}-${{ steps.keys.outputs.xcode }}-${{ steps.keys.outputs.freerdp }}-${{ hashFiles('Scripts/build-freerdp.sh', 'Scripts/build-openssl.sh') }}
+        path: |
+          Vendor/build/freerdp
+          .tools/openssl-*.tar.gz
+        key: freerdp-v2-${{ runner.arch }}-${{ steps.keys.outputs.xcode }}-${{ steps.keys.outputs.freerdp }}-${{ hashFiles('Scripts/build-freerdp.sh', 'Scripts/build-openssl.sh') }}
 
     - name: Build FreeRDP
       if: steps.freerdp.outputs.cache-hit != 'true'
@@ -65,9 +70,12 @@ runs:
         brew install cmake
         Scripts/build-freerdp.sh
 
-    - name: Check xcframeworks
+    - name: Check native libraries and source archives
       shell: bash
       run: |
         test -f Packages/ConstellationTerminal/GhosttyKit.xcframework/Info.plist
         test -f Packages/ConstellationRemoteDesktop/FreeRDPKit.xcframework/Info.plist
         test -d Vendor/ghostty/zig-out/share/ghostty
+        compgen -G "$HOME/.cache/zig/p/*.tar.gz" > /dev/null
+        openssl_version="$(sed -n 's/^OPENSSL_VERSION="\([^"]*\)"/\1/p' Scripts/build-openssl.sh)"
+        test -f ".tools/openssl-$openssl_version.tar.gz"

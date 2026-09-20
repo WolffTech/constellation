@@ -64,11 +64,10 @@ jobs:
             echo "BUILD_NUMBER=$(git rev-list --count HEAD)"
           } >> "$GITHUB_ENV"
 
-      # Rebuild release artifacts from the pinned source dependencies.
+      # Reuse native libraries and their source archives cached by CI on main.
+      # Changed dependency pins or build scripts still trigger a rebuild.
       - name: Build native libraries
         uses: ./.github/actions/native-libraries
-        with:
-          use-cache: "false"
 
       - name: Install XcodeGen
         run: brew install xcodegen
