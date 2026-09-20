@@ -19,6 +19,11 @@ final class RDPSurfaceView: NSView {
     /// Sends translated input to the live session. Set by `RDPSession`.
     var inputSink: ((RDPInputEvent) -> Void)?
 
+    /// The cursor the server last asked for. Set by `RDPSession`.
+    var cursorShape: RDPCursorShape = .systemDefault {
+        didSet { if cursorShape != oldValue { cursorShapeChanged() } }
+    }
+
     private var buffer: UnsafePointer<UInt8>?
     private var bufferSize = CGSize.zero
     private var stride = 0
@@ -26,6 +31,8 @@ final class RDPSurfaceView: NSView {
     private var previousModifiers: NSEvent.ModifierFlags = []
     private var displayLink: CADisplayLink?
     private var needsSnapshot = false
+    /// The cursor built from `cursorShape` at the scale it was last shown at.
+    private var cursorCache: (pointsPerPixel: CGFloat, cursor: NSCursor)?
     /// Frame updates received and snapshots taken; read by profiling tests.
     private(set) var updateCount = 0
     private(set) var snapshotCount = 0
@@ -63,6 +70,8 @@ final class RDPSurfaceView: NSView {
         bufferSize = CGSize(width: width, height: height)
         self.stride = stride
         needsSnapshot = true
+        // A new desktop size changes the cursor's scale even if the frame did not.
+        window?.invalidateCursorRects(for: self)
     }
 
     func clear() {
@@ -70,6 +79,7 @@ final class RDPSurfaceView: NSView {
         bufferSize = .zero
         needsSnapshot = false
         layer?.contents = nil
+        cursorShape = .systemDefault
     }
 
     func markDirty() {
@@ -127,6 +137,39 @@ final class RDPSurfaceView: NSView {
         layer?.contents = image
     }
 
+    // MARK: Cursor
+
+    /// The size one remote pixel is drawn at, so the cursor scales with the desktop.
+    private var pointsPerPixel: CGFloat {
+        bufferSize.width > 0 && bounds.width > 0 ? bounds.width / bufferSize.width : 1
+    }
+
+    private var cursor: NSCursor {
+        let scale = pointsPerPixel
+        if let cursorCache, cursorCache.pointsPerPixel == scale { return cursorCache.cursor }
+        let cursor = cursorShape.makeCursor(pointsPerPixel: scale)
+        cursorCache = (scale, cursor)
+        return cursor
+    }
+
+    /// AppKit calls this again whenever the frame changes, which rescales the cursor.
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: cursor)
+    }
+
+    private func cursorShapeChanged() {
+        cursorCache = nil
+        window?.invalidateCursorRects(for: self)
+        // Cursor rects are not re-evaluated during a drag, and that is exactly
+        // when the shape matters (resizing a window), so apply it directly too.
+        if isPointerOverSurface { cursor.set() }
+    }
+
+    private var isPointerOverSurface: Bool {
+        guard let window, window.isKeyWindow, let content = window.contentView else { return false }
+        return content.hitTest(window.mouseLocationOutsideOfEventStream) === self
+    }
+
     // MARK: Pointer
 
     /// Maps a view location to remote framebuffer coordinates (top-left origin).
@@ -151,6 +194,19 @@ final class RDPSurfaceView: NSView {
     override func rightMouseUp(with event: NSEvent) { sendButton(event, button: .right, down: false) }
     override func otherMouseDown(with event: NSEvent) { sendButton(event, button: .middle, down: true) }
     override func otherMouseUp(with event: NSEvent) { sendButton(event, button: .middle, down: false) }
+
+    /// Without this the view only hears about the pointer while a button is
+    /// down, so the desktop never sees a hover: no resize cursors at window
+    /// edges, no tooltips, no highlights.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil))
+    }
 
     override func mouseMoved(with event: NSEvent) { sendMove(event) }
     override func mouseDragged(with event: NSEvent) { sendMove(event) }

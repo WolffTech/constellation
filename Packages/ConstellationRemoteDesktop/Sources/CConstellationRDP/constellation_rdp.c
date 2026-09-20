@@ -25,6 +25,7 @@
 #include <freerdp/constants.h>
 #include <freerdp/error.h>
 #include <freerdp/gdi/gdi.h>
+#include <freerdp/graphics.h>
 #include <freerdp/input.h>
 #include <freerdp/settings.h>
 
@@ -329,6 +330,85 @@ static UINT crdp_gfx_update_window(RdpgfxClientContext *gfx, gdiGfxSurface *surf
     return CHANNEL_RC_OK;
 }
 
+// MARK: - Cursor shapes
+
+// The server leaves the cursor out of the frame and sends its shape instead.
+// FreeRDP caches each shape as one of these; the pixels are converted once,
+// when the shape arrives, and replayed every time the server selects it.
+typedef struct {
+    rdpPointer pointer; // must be first: FreeRDP allocates and owns this
+    BYTE *pixels;       // BGRA, straight alpha; NULL if the shape was unusable
+} crdpPointer;
+
+static void crdp_emit_cursor(rdpContext *context, const crdp_cursor *cursor) {
+    crdp_session *session = ((crdpContext *)context)->session;
+    if (session->callbacks.cursor_changed)
+        session->callbacks.cursor_changed(session->callbacks.context, cursor);
+}
+
+// A shape that cannot be converted falls back to the arrow in `Set`; failing
+// here would make FreeRDP drop the whole session over a cursor.
+static BOOL crdp_pointer_new(rdpContext *context, rdpPointer *pointer) {
+    crdpPointer *cursor = (crdpPointer *)pointer;
+    rdpGdi *gdi = context->gdi;
+    if (!gdi || pointer->width == 0 || pointer->height == 0)
+        return TRUE;
+    cursor->pixels = calloc((size_t)pointer->width * pointer->height, 4);
+    if (!cursor->pixels)
+        return TRUE;
+    if (!freerdp_image_copy_from_pointer_data(cursor->pixels, PIXEL_FORMAT_BGRA32, 0, 0, 0,
+                                              pointer->width, pointer->height, pointer->xorMaskData,
+                                              pointer->lengthXorMask, pointer->andMaskData,
+                                              pointer->lengthAndMask, pointer->xorBpp, &gdi->palette)) {
+        free(cursor->pixels);
+        cursor->pixels = NULL;
+    }
+    return TRUE;
+}
+
+static void crdp_pointer_free(rdpContext *context, rdpPointer *pointer) {
+    (void)context;
+    crdpPointer *cursor = (crdpPointer *)pointer;
+    free(cursor->pixels);
+    cursor->pixels = NULL;
+}
+
+static BOOL crdp_pointer_set(rdpContext *context, rdpPointer *pointer) {
+    const crdpPointer *cursor = (const crdpPointer *)pointer;
+    crdp_cursor shape = { .kind = CRDP_CURSOR_DEFAULT };
+    if (cursor->pixels) {
+        shape.kind = CRDP_CURSOR_IMAGE;
+        shape.pixels = cursor->pixels;
+        shape.width = pointer->width;
+        shape.height = pointer->height;
+        shape.hotspot_x = pointer->xPos;
+        shape.hotspot_y = pointer->yPos;
+    }
+    crdp_emit_cursor(context, &shape);
+    return TRUE;
+}
+
+static BOOL crdp_pointer_set_null(rdpContext *context) {
+    crdp_emit_cursor(context, &(crdp_cursor){ .kind = CRDP_CURSOR_HIDDEN });
+    return TRUE;
+}
+
+static BOOL crdp_pointer_set_default(rdpContext *context) {
+    crdp_emit_cursor(context, &(crdp_cursor){ .kind = CRDP_CURSOR_DEFAULT });
+    return TRUE;
+}
+
+static void crdp_register_pointer(rdpContext *context) {
+    rdpPointer prototype = { 0 };
+    prototype.size = sizeof(crdpPointer);
+    prototype.New = crdp_pointer_new;
+    prototype.Free = crdp_pointer_free;
+    prototype.Set = crdp_pointer_set;
+    prototype.SetNull = crdp_pointer_set_null;
+    prototype.SetDefault = crdp_pointer_set_default;
+    graphics_register_pointer(context->graphics, &prototype);
+}
+
 // MARK: - Channel wiring
 
 // The server sends Display Control capabilities shortly after the channel
@@ -542,6 +622,7 @@ static BOOL crdp_post_connect(freerdp *instance) {
         return FALSE;
 
     rdpContext *context = instance->context;
+    crdp_register_pointer(context);
     rdpGdi *gdi = context->gdi;
     crdp_session *session = ((crdpContext *)context)->session;
     rdpSettings *settings = context->settings;
