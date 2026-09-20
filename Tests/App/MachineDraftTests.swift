@@ -222,6 +222,51 @@ struct MachineDraftTests {
         #expect(credentials.count == 2)
     }
 
+    @Test func anAzureVirtualDesktopFileFillsInANewMachine() throws {
+        let file = try AVDConnectionFile(contents: """
+            full address:s:rdgateway-r1.wvd.microsoft.com
+            resourceprovider:s:arm
+            gatewayhostname:s:afdfp-rdgateway-r1.wvd.microsoft.com:443
+            armpath:s:/subscriptions/s/hostpools/p
+            remotedesktopname:s:Cloud PC
+            """)
+        var draft = MachineDraft(newMachine: "")
+        draft.addRDPProfile()
+        draft.applyAzureVirtualDesktop(file, to: draft.rdpProfiles[0].id)
+
+        // The blank starting address is reused, not left behind to fail validation.
+        #expect(draft.addresses.map(\.host) == ["rdgateway-r1.wvd.microsoft.com"])
+        #expect(draft.machine.name == "Cloud PC")
+
+        guard case .batch(let changes) = try draft.change() else {
+            Issue.record("expected a batch")
+            return
+        }
+        let saved = try #require(changes.compactMap { if case .upsertProfile(.rdp(let p)) = $0 { p } else { nil } }.first)
+        #expect(saved.gateway == file.gateway)
+    }
+
+    @Test func replacingAGatewayWithAzureVirtualDesktopDropsItsPassword() throws {
+        let machine = Machine(name: "win")
+        let credential = CredentialReference(label: "gateway", kind: .password)
+        let rdp = RDPProfile(machineID: machine.id, gateway: RDPGateway(
+            host: "gw.example.com", credentials: .separate(username: "dmz-nick", domain: nil, credentialID: credential.id)))
+        let address = MachineAddress(machineID: machine.id, label: "", host: "10.0.0.7")
+        let snapshot = MachineLibrarySnapshot(machines: [machine], addresses: [address], profiles: [.rdp(rdp)], credentials: [credential])
+        var draft = MachineDraft(editing: machine, in: snapshot)
+        let file = try AVDConnectionFile(contents: """
+            full address:s:rdgateway-r1.wvd.microsoft.com
+            resourceprovider:s:arm
+            gatewayhostname:s:afdfp-rdgateway-r1.wvd.microsoft.com
+            """)
+        draft.applyAzureVirtualDesktop(file, to: rdp.id)
+
+        #expect(draft.removedCredentialIDs == [credential.id])
+        #expect(draft.addresses.map(\.host) == ["10.0.0.7", "rdgateway-r1.wvd.microsoft.com"])
+        #expect(draft.machine.name == "win")
+        #expect(draft.rdpProfiles[0].resolvedProfile().gateway == file.gateway)
+    }
+
     @Test func rdpGatewaysSharingTheDesktopAccountSaveNoSecondCredential() throws {
         var draft = MachineDraft(newMachine: "win")
         draft.addresses[0].host = "10.0.0.7"

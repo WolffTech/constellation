@@ -115,6 +115,24 @@ struct MachineDraft: Equatable {
             name: rdpProfiles.isEmpty ? "RDP" : "RDP \(rdpProfiles.count + 1)")))
     }
 
+    /// Points an RDP profile at the desktop an Azure Virtual Desktop connection
+    /// file describes. The file's address joins the machine's, since a profile
+    /// cannot connect without one, and names a machine that has no name yet.
+    mutating func applyAzureVirtualDesktop(_ file: AVDConnectionFile, to id: ProfileID) {
+        guard let index = rdpProfiles.firstIndex(where: { $0.id == id }) else { return }
+        if let credential = rdpProfiles[index].gateway.credentialID { removedCredentialIDs.insert(credential) }
+        rdpProfiles[index].gateway = RDPGatewayDraft(gateway: file.gateway)
+        if !addresses.contains(where: { $0.host.caseInsensitiveCompare(file.address) == .orderedSame }) {
+            // A new machine starts with one blank address row; use it.
+            if let blank = addresses.firstIndex(where: { $0.host.trimmingCharacters(in: .whitespaces).isEmpty }) {
+                addresses[blank].host = file.address
+            } else {
+                addresses.append(MachineAddress(machineID: machine.id, label: "", host: file.address, priority: addresses.count))
+            }
+        }
+        if machine.name.trimmingCharacters(in: .whitespaces).isEmpty, let name = file.name { machine.name = name }
+    }
+
     mutating func removeProfile(_ id: ProfileID) {
         if let index = profiles.firstIndex(where: { $0.profile.id == id }) {
             if let credential = profiles[index].profile.credentialID { removedCredentialIDs.insert(credential) }
@@ -405,8 +423,12 @@ struct RDPGatewayDraft: Equatable {
         }
     }
     var existingCredentialLabel: String?
+    /// Set by an imported connection file. The gateway then signs in with
+    /// Entra ID and the account fields above go unused.
+    var azureVirtualDesktop: AVDResource?
 
     init(gateway: RDPGateway? = nil, credential: CredentialReference? = nil) {
+        azureVirtualDesktop = gateway?.azureVirtualDesktop
         isEnabled = gateway != nil
         host = gateway?.host ?? ""
         port = gateway?.port ?? RDPGateway.defaultPort
@@ -434,6 +456,9 @@ struct RDPGatewayDraft: Equatable {
     func resolved() -> RDPGateway? {
         guard isEnabled else { return nil }
         let host = host.trimmingCharacters(in: .whitespaces)
+        if let azureVirtualDesktop {
+            return RDPGateway(host: host, port: port, credentials: .azureVirtualDesktop(azureVirtualDesktop))
+        }
         guard !usesDesktopAccount else { return RDPGateway(host: host, port: port) }
         let username = username.trimmingCharacters(in: .whitespaces)
         let domain = domain.trimmingCharacters(in: .whitespaces)
