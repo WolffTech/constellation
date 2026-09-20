@@ -90,7 +90,8 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
             guard let window = windows[summary.id] else { continue }
             window.tab.title = summary.tabTitle
             window.tab.toolTip = tabToolTip(for: summary)
-            window.updateTabStatus(summary.tabStatus, showsAccessoryCloseButton: sessions.count == 1)
+            window.updateTabStatus(summary.tabStatus)
+            window.revealsCloseButtonAsOnlyTab = sessions.count == 1
         }
 
         applyTabOrder(sessions.map(\.id))
@@ -278,12 +279,16 @@ private final class SessionWindow: NSWindow {
     weak var manager: SessionWindowManager?
     private var closesFromCoordinator = false
     private var tabStatus: SessionTabStatus?
-    private var showsAccessoryCloseButton = false
-    private lazy var tabAccessory = NSHostingView(
-        rootView: SessionTabAccessory(status: .disconnected, showsCloseButton: false) { [weak self] in
-            guard let self else { return }
-            self.manager?.requestClose(self.sessionID)
-        })
+    private lazy var tabAccessory = NSHostingView(rootView: SessionTabAccessory(status: .disconnected))
+    private lazy var onlyTabCloseButton = OnlyTabCloseButton(window: self) { [weak self] in
+        guard let self else { return }
+        self.manager?.requestClose(self.sessionID)
+    }
+
+    /// Set on every reconcile, which also re-attaches after AppKit rebuilds the tab buttons.
+    var revealsCloseButtonAsOnlyTab = false {
+        didSet { refreshOnlyTabCloseButton() }
+    }
 
     init(
         sessionID: SessionID,
@@ -308,19 +313,30 @@ private final class SessionWindow: NSWindow {
         manager?.presentQuickConnect()
     }
 
-    func updateTabStatus(_ status: SessionTabStatus, showsAccessoryCloseButton: Bool) {
-        guard status != tabStatus || showsAccessoryCloseButton != self.showsAccessoryCloseButton else { return }
+    // AppKit installs the tab bar through this call, so its buttons exist afterwards.
+    override func addTitlebarAccessoryViewController(_ childViewController: NSTitlebarAccessoryViewController) {
+        super.addTitlebarAccessoryViewController(childViewController)
+        refreshOnlyTabCloseButton()
+    }
+
+    func updateTabStatus(_ status: SessionTabStatus) {
+        guard status != tabStatus else { return }
         tabStatus = status
-        self.showsAccessoryCloseButton = showsAccessoryCloseButton
-        tabAccessory.rootView = SessionTabAccessory(
-            status: status,
-            showsCloseButton: showsAccessoryCloseButton
-        ) { [weak self] in
-            guard let self else { return }
-            self.manager?.requestClose(self.sessionID)
-        }
+        tabAccessory.rootView = SessionTabAccessory(status: status)
         tabAccessory.toolTip = status.accessibilityLabel
         tab.accessoryView = tabAccessory
+    }
+
+    private func refreshOnlyTabCloseButton() {
+        // AppKit rebuilds tab buttons after the current layout pass.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.revealsCloseButtonAsOnlyTab {
+                self.onlyTabCloseButton.attach()
+            } else {
+                self.onlyTabCloseButton.detach()
+            }
+        }
     }
 
     func closeFromCoordinator() {
@@ -367,31 +383,112 @@ extension SessionSummary {
     }
 }
 
+/// AppKit keeps a tab's close button hidden while it is the only tab. This reveals
+/// that native button on hover so closing looks the same with any number of tabs.
+@MainActor
+private final class OnlyTabCloseButton: NSResponder {
+    private weak var window: NSWindow?
+    private let onClose: () -> Void
+    private weak var tabButton: NSView?
+    private weak var closeButton: NSButton?
+    private var trackingArea: NSTrackingArea?
+    private weak var nativeTarget: AnyObject?
+    private var nativeAction: Selector?
+
+    init(window: NSWindow, onClose: @escaping () -> Void) {
+        self.window = window
+        self.onClose = onClose
+        super.init()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The browser window can share the tab group, so the group decides, not the session count.
+    private var isOnlyTab: Bool {
+        guard let group = window?.tabGroup else { return true }
+        return group.windows.count == 1
+    }
+
+    func attach() {
+        guard let window, isOnlyTab else { return detach() }
+        guard closeButton?.window !== window else { return }
+        detach()
+        // These are private AppKit views; without them the tab simply has no close button.
+        guard let closeButton = window.contentView?.superview?
+                .firstDescendant(withIdentifier: "_closeButton") as? NSButton,
+              let tabButton = closeButton.firstAncestor(withClassName: "NSTabButton") else { return }
+
+        let trackingArea = NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        tabButton.addTrackingArea(trackingArea)
+        nativeTarget = closeButton.target
+        nativeAction = closeButton.action
+        closeButton.target = self
+        closeButton.action = #selector(close(_:))
+        self.trackingArea = trackingArea
+        self.tabButton = tabButton
+        self.closeButton = closeButton
+
+        let mouse = tabButton.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        setRevealed(tabButton.bounds.contains(mouse))
+    }
+
+    func detach() {
+        if let trackingArea { tabButton?.removeTrackingArea(trackingArea) }
+        if let closeButton, closeButton.target === self {
+            closeButton.target = nativeTarget
+            closeButton.action = nativeAction
+        }
+        trackingArea = nil
+        tabButton = nil
+        closeButton = nil
+    }
+
+    override func mouseEntered(with event: NSEvent) { setRevealed(true) }
+
+    override func mouseExited(with event: NSEvent) { setRevealed(false) }
+
+    @objc private func close(_ sender: Any?) {
+        // A button that outlived the single-tab state belongs to AppKit again.
+        guard isOnlyTab else {
+            if let nativeAction { NSApp.sendAction(nativeAction, to: nativeTarget, from: sender) }
+            return
+        }
+        onClose()
+    }
+
+    private func setRevealed(_ revealed: Bool) {
+        // Deferred so AppKit's own hover update for the tab cannot land after this one.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isOnlyTab else { return }
+            self.closeButton?.animator().alphaValue = revealed ? 1 : 0
+        }
+    }
+}
+
+private extension NSView {
+    func firstDescendant(withIdentifier identifier: String) -> NSView? {
+        for subview in subviews {
+            if subview.identifier?.rawValue == identifier { return subview }
+            if let match = subview.firstDescendant(withIdentifier: identifier) { return match }
+        }
+        return nil
+    }
+
+    func firstAncestor(withClassName className: String) -> NSView? {
+        var view = superview
+        while let candidate = view, candidate.className != className { view = candidate.superview }
+        return view
+    }
+}
+
 private struct SessionTabAccessory: View {
     let status: SessionTabStatus
-    let showsCloseButton: Bool
-    let onClose: () -> Void
-    @State private var closeHovered = false
 
     var body: some View {
-        HStack(spacing: 4) {
-            statusIndicator
-            if showsCloseButton {
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .frame(width: 13, height: 13)
-                        .background(closeHovered ? Color.primary.opacity(0.12) : .clear, in: Circle())
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .onHover { closeHovered = $0 }
-                .help("Close Session")
-                .accessibilityLabel("Close Session")
-            }
-        }
-        .fixedSize()
+        statusIndicator
+            .fixedSize()
     }
 
     @ViewBuilder
