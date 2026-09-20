@@ -35,6 +35,7 @@ typedef enum {
     CRDP_FAILURE_TLS,
     CRDP_FAILURE_CONNECT,        // TCP connect / transport failed
     CRDP_FAILURE_GATEWAY,        // the RD Gateway refused or dropped the tunnel
+    CRDP_FAILURE_SIGN_IN,        // Entra ID issued no token for the sign-in
 } crdp_failure;
 
 /// Certificate verdicts, matching FreeRDP's VerifyCertificateEx return values.
@@ -53,6 +54,26 @@ typedef enum {
     CRDP_CONNECTION_BROADBAND,
     CRDP_CONNECTION_MODEM,
 } crdp_connection_type;
+
+/// The Azure Virtual Desktop resource a connection file describes. Its gateway
+/// is `gateway_host`/`gateway_port` in `crdp_config`; the gateway brokers the
+/// desktop from these values once Entra ID has issued a token. Strings may be
+/// NULL where the connection file had none.
+typedef struct {
+    const char *endpoint_pool;
+    const char *geo;
+    const char *arm_path;
+    const char *tenant_id;
+    const char *diagnostic_service_url;
+    const char *hub_discovery_url;
+    const char *activity_hint;
+    const char *load_balance_info;
+    /// The resource's id in its workspace. The gateway wants it for desktops
+    /// too, so it does not turn RemoteApp mode on.
+    const char *application;
+    /// The desktop also signs in with Entra ID rather than a password.
+    bool entra_desktop_sign_in;
+} crdp_avd;
 
 typedef struct {
     const char *host;
@@ -78,6 +99,10 @@ typedef struct {
     const char *gateway_username; // may be NULL
     const char *gateway_domain;   // may be NULL
     const char *gateway_password; // may be NULL; copied into settings, not retained here
+    /// Non-NULL reaches the gateway over Azure Virtual Desktop's transport and
+    /// signs in through `entra_sign_in`; the `gateway_*` account fields are
+    /// ignored. Copied into settings, not retained.
+    const crdp_avd *avd;
 } crdp_config;
 
 /// A certificate awaiting a verdict. Pointers are valid only for the duration
@@ -134,6 +159,11 @@ typedef struct {
     void (*clipboard_text)(void *context, const char *utf8);
     /// The server changed the cursor shape.
     void (*cursor_changed)(void *context, const crdp_cursor *cursor);
+    /// Blocks the client thread while the user signs in to Entra ID at
+    /// `authorize_url`. Returns the authorization code from the redirect as a
+    /// malloc'd string the bridge frees, or NULL if the user gave up. The
+    /// bridge exchanges the code for the token itself.
+    char *(*entra_sign_in)(void *context, const char *authorize_url);
 } crdp_callbacks;
 
 /// Builds a session. Copies `config` and `callbacks`; both may be freed after.

@@ -58,6 +58,10 @@ public struct RDPGatewayConfiguration: Sendable, Equatable {
         case sameAsDesktop
         /// The password comes from the session's gateway password provider.
         case separate(username: String, domain: String?)
+        /// An Azure Virtual Desktop gateway: the user signs in to Entra ID
+        /// through the session's sign-in handler and the gateway brokers
+        /// `resource`.
+        case azureVirtualDesktop(RDPAzureVirtualDesktopResource)
     }
 
     public var host: String
@@ -70,6 +74,94 @@ public struct RDPGatewayConfiguration: Sendable, Equatable {
         self.account = account
     }
 }
+
+/// What an Azure Virtual Desktop gateway needs to broker a desktop, as its
+/// connection file gives it. The gateway rejects a resource it does not know,
+/// so none of this is validated here.
+public struct RDPAzureVirtualDesktopResource: Sendable, Equatable {
+    public var endpointPool: String?
+    public var geo: String?
+    public var armPath: String?
+    /// Scopes the sign-in page to the tenant; `nil` lets any account sign in.
+    public var tenantID: String?
+    public var diagnosticServiceURL: String?
+    public var hubDiscoveryURL: String?
+    public var activityHint: String?
+    public var loadBalanceInfo: String?
+    /// The resource's id in its workspace, sent for desktops too.
+    public var application: String?
+    /// The desktop also signs in with Entra ID, so no password is needed.
+    public var usesEntraDesktopSignIn: Bool
+
+    public init(
+        endpointPool: String? = nil,
+        geo: String? = nil,
+        armPath: String? = nil,
+        tenantID: String? = nil,
+        diagnosticServiceURL: String? = nil,
+        hubDiscoveryURL: String? = nil,
+        activityHint: String? = nil,
+        loadBalanceInfo: String? = nil,
+        application: String? = nil,
+        usesEntraDesktopSignIn: Bool = false
+    ) {
+        self.endpointPool = endpointPool
+        self.geo = geo
+        self.armPath = armPath
+        self.tenantID = tenantID
+        self.diagnosticServiceURL = diagnosticServiceURL
+        self.hubDiscoveryURL = hubDiscoveryURL
+        self.activityHint = activityHint
+        self.loadBalanceInfo = loadBalanceInfo
+        self.application = application
+        self.usesEntraDesktopSignIn = usesEntraDesktopSignIn
+    }
+}
+
+/// An Entra ID sign-in page to show, and how to recognise its end. FreeRDP
+/// builds the page's URL and exchanges the resulting code itself.
+public struct RDPEntraSignInRequest: Sendable, Equatable {
+    public let authorizeURL: URL
+    /// Where Entra ID sends the browser once the user has signed in. Nothing
+    /// serves this address; the code is read off the navigation to it.
+    public let redirectURI: String
+
+    /// `nil` if `authorizeURL` is not a URL with a `redirect_uri`. A
+    /// `loginHint` pre-fills the account on the sign-in page.
+    public init?(authorizeURL: String, loginHint: String? = nil) {
+        var text = authorizeURL
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        if let hint = loginHint?.addingPercentEncoding(withAllowedCharacters: allowed), !hint.isEmpty {
+            text += "&login_hint=\(hint)"
+        }
+        guard let url = URL(string: text),
+              let redirect = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                  .queryItems?.first(where: { $0.name == "redirect_uri" })?.value,
+              !redirect.isEmpty
+        else { return nil }
+        self.authorizeURL = url
+        self.redirectURI = redirect
+    }
+
+    /// Whether a navigation to `url` ends the sign-in, with or without a code.
+    public func isRedirect(_ url: URL) -> Bool {
+        url.absoluteString.lowercased().hasPrefix(redirectURI.lowercased())
+    }
+
+    /// The authorization code a redirect carries, or `nil` if Entra ID
+    /// reported an error instead.
+    public func authorizationCode(from url: URL) -> String? {
+        guard isRedirect(url) else { return nil }
+        let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "code" })?.value
+        return code?.isEmpty == false ? code : nil
+    }
+}
+
+/// Shows an Entra ID sign-in page and returns the authorization code from its
+/// redirect, or `nil` if the user gave up. Runs on the main actor while
+/// FreeRDP's client thread waits; cancelling the task must dismiss the page.
+public typealias RDPEntraSignIn = @MainActor @Sendable (RDPEntraSignInRequest) async -> String?
 
 /// The network profile Windows tunes its desktop experience for (wallpaper,
 /// font smoothing, animations, themes). `automatic` leaves FreeRDP's defaults
