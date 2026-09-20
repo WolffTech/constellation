@@ -14,6 +14,8 @@ struct RDPSessionRequest: Equatable, Sendable {
     var domain: String?
     var credentialID: CredentialID?
     var sharesClipboard: Bool
+    /// `nil` connects directly; otherwise `host` is resolved by the gateway.
+    var gateway: RDPGateway?
     /// Shown in prompts so the user knows which machine asks.
     var machineName: String
 }
@@ -25,7 +27,8 @@ protocol RDPSessionDriving: AnyObject {
 
 /// Starts FreeRDP sessions. NLA needs the account and password before the
 /// connection opens, so anything the profile and vault cannot supply is asked
-/// for up front; certificates are confirmed while FreeRDP waits. App-wide RDP
+/// for up front, for the desktop first and then for a gateway with its own
+/// account; certificates are confirmed while FreeRDP waits. App-wide RDP
 /// settings are read as each session starts.
 @MainActor
 final class FreeRDPSessionDriver: RDPSessionDriving {
@@ -66,6 +69,14 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
             if let entered = entry.password { password = entered }
         }
 
+        var gateway: RDPGatewayConfiguration?
+        var gatewayPassword: String?
+        if let requested = request.gateway {
+            let (account, password) = try gatewayAccount(for: requested, machineName: request.machineName)
+            gateway = RDPGatewayConfiguration(host: requested.host, port: requested.port, account: account)
+            gatewayPassword = password
+        }
+
         let settings = settings()
         let configuration = RDPSessionConfiguration(
             host: request.host,
@@ -76,18 +87,47 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
             height: settings.desktopHeight,
             dynamicResolution: settings.dynamicResolution,
             sharesClipboard: request.sharesClipboard,
-            connectionQuality: settings.connectionQuality)
+            connectionQuality: settings.connectionQuality,
+            gateway: gateway)
         let certificatePrompt = self.certificatePrompt
         let trustStore = self.trustStore
         let machineName = request.machineName
         let session = RDPSession(
             configuration: configuration,
             password: { password },
+            gatewayPassword: { [gatewayPassword] in gatewayPassword },
             verifyCertificate: { certificate in
                 await resolveCertificate(certificate, machineName: machineName, trustStore: trustStore, prompt: certificatePrompt)
             })
         session.displayMode = settings.defaultDisplayMode
         return session
+    }
+
+    /// Resolves a gateway's own account the way the desktop's is: profile and
+    /// vault first, then a prompt for whatever is missing.
+    private func gatewayAccount(
+        for gateway: RDPGateway,
+        machineName: String
+    ) throws -> (RDPGatewayConfiguration.Account, password: String?) {
+        guard case .separate(let savedUsername, let savedDomain, let credentialID) = gateway.credentials else {
+            return (.sameAsDesktop, nil)
+        }
+        var username = savedUsername ?? ""
+        var domain = savedDomain ?? ""
+        var password = credentialID.flatMap { try? vault.retrieve(id: $0) }?.withValue { $0 }
+        if username.isEmpty || password == nil {
+            guard let entry = credentialPrompt(RDPCredentialPrompt(
+                machineName: machineName,
+                username: savedUsername,
+                domain: savedDomain,
+                hasStoredPassword: password != nil,
+                gatewayHost: gateway.host))
+            else { throw RDPSessionDriverError.cancelled }
+            username = entry.username
+            domain = entry.domain
+            if let entered = entry.password { password = entered }
+        }
+        return (.separate(username: username, domain: domain.isEmpty ? nil : domain), password)
     }
 }
 
@@ -146,6 +186,8 @@ struct RDPCredentialPrompt: Equatable, Sendable {
     var username: String?
     var domain: String?
     var hasStoredPassword: Bool
+    /// Set when the account is for this RD Gateway rather than the desktop.
+    var gatewayHost: String?
 }
 
 struct RDPCredentialEntry: Equatable, Sendable {
@@ -160,10 +202,17 @@ struct RDPCredentialEntry: Equatable, Sendable {
 enum RDPCredentialPrompter {
     static func ask(_ prompt: RDPCredentialPrompt) -> RDPCredentialEntry? {
         let alert = NSAlert()
-        alert.messageText = "\(prompt.machineName) needs Windows credentials"
-        alert.informativeText = prompt.hasStoredPassword
-            ? "Enter the account to sign in with. The saved password will be used."
-            : "Enter the account and password to sign in with."
+        if let gatewayHost = prompt.gatewayHost {
+            alert.messageText = "The gateway for \(prompt.machineName) needs credentials"
+            alert.informativeText = prompt.hasStoredPassword
+                ? "Enter the account to sign in to \(gatewayHost) with. The saved password will be used."
+                : "Enter the account and password to sign in to \(gatewayHost) with."
+        } else {
+            alert.messageText = "\(prompt.machineName) needs Windows credentials"
+            alert.informativeText = prompt.hasStoredPassword
+                ? "Enter the account to sign in with. The saved password will be used."
+                : "Enter the account and password to sign in with."
+        }
         let width: CGFloat = 300
         let rows = prompt.hasStoredPassword ? 2 : 3
         let stack = NSView(frame: NSRect(x: 0, y: 0, width: width, height: CGFloat(rows) * 30 - 6))
@@ -220,8 +269,9 @@ enum RDPCertificatePrompter {
         alert.messageText = changed
             ? "The certificate for \(machineName) has changed"
             : "Verify the identity of \(machineName)"
+        let server = certificate.isGateway ? "RD Gateway" : "RDP server"
         var lines = [
-            "The RDP server at \(certificate.host):\(certificate.port) presented a certificate that could not be verified.",
+            "The \(server) at \(certificate.host):\(certificate.port) presented a certificate that could not be verified.",
             "",
             "Subject: \(certificate.subject)",
             "Issuer: \(certificate.issuer)",

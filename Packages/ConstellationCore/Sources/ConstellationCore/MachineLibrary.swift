@@ -64,7 +64,7 @@ public struct MachineLibrarySnapshot: Hashable, Sendable {
 
     /// Credential references no profile uses.
     public var orphanedCredentials: [CredentialReference] {
-        let used = Set(profiles.compactMap(\.credentialID))
+        let used = Set(profiles.flatMap(\.credentialIDs))
         return credentials.filter { !used.contains($0.id) }
     }
 }

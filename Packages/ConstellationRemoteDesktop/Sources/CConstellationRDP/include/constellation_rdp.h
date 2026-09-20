@@ -34,6 +34,7 @@ typedef enum {
     CRDP_FAILURE_DNS,
     CRDP_FAILURE_TLS,
     CRDP_FAILURE_CONNECT,        // TCP connect / transport failed
+    CRDP_FAILURE_GATEWAY,        // the RD Gateway refused or dropped the tunnel
 } crdp_failure;
 
 /// Certificate verdicts, matching FreeRDP's VerifyCertificateEx return values.
@@ -67,6 +68,16 @@ typedef struct {
     bool dynamic_resolution; // negotiate the Display Control channel
     bool share_clipboard;
     crdp_connection_type connection_type;
+    /// RD Gateway to tunnel through over HTTPS. NULL connects directly; `host`
+    /// is then resolved by the gateway rather than locally.
+    const char *gateway_host;
+    uint32_t gateway_port; // 0 means the gateway default, 443
+    /// Sign in to the gateway with `username`/`domain`/`password`; the
+    /// `gateway_*` account fields below are ignored.
+    bool gateway_use_same_credentials;
+    const char *gateway_username; // may be NULL
+    const char *gateway_domain;   // may be NULL
+    const char *gateway_password; // may be NULL; copied into settings, not retained here
 } crdp_config;
 
 /// A certificate awaiting a verdict. Pointers are valid only for the duration
@@ -80,6 +91,7 @@ typedef struct {
     const char *fingerprint;
     bool host_mismatch;
     bool changed; // the stored certificate differs from this one
+    bool gateway; // presented by the RD Gateway rather than the desktop
 } crdp_certificate;
 
 /// FreeRDP calls these from the client thread. `context` is the opaque pointer

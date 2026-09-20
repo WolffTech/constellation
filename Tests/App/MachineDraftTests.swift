@@ -196,6 +196,76 @@ struct MachineDraftTests {
         #expect(draft.profileIDs == [draft.profiles[0].id, saved.id])
     }
 
+    @Test func rdpGatewaysSaveTheirOwnAccountAndPassword() throws {
+        var draft = MachineDraft(newMachine: "win")
+        draft.addresses[0].host = "10.0.0.7"
+        draft.addRDPProfile()
+        draft.rdpProfiles[0].enteredSecret = "pa55"
+        draft.rdpProfiles[0].gateway.isEnabled = true
+        draft.rdpProfiles[0].gateway.host = " gw.example.com "
+        draft.rdpProfiles[0].gateway.usesDesktopAccount = false
+        draft.rdpProfiles[0].gateway.username = "dmz-nick "
+        draft.rdpProfiles[0].gateway.enteredSecret = "gw55"
+
+        guard case .batch(let changes) = try draft.change() else {
+            Issue.record("expected a batch")
+            return
+        }
+        let saved = try #require(changes.compactMap { if case .upsertProfile(.rdp(let p)) = $0 { p } else { nil } }.first)
+        let credentials = changes.compactMap { if case .upsertCredential(let c) = $0 { c } else { nil } }
+        let gatewayCredential = try #require(credentials.first { $0.label == "win · RDP RDP gateway password" })
+        #expect(saved.gateway == RDPGateway(
+            host: "gw.example.com", port: 443,
+            credentials: .separate(username: "dmz-nick", domain: nil, credentialID: gatewayCredential.id)))
+        #expect(saved.credentialID != gatewayCredential.id)
+        #expect(Set(draft.pendingSecrets.map(\.credentialID)) == Set(credentials.map(\.id)))
+        #expect(credentials.count == 2)
+    }
+
+    @Test func rdpGatewaysSharingTheDesktopAccountSaveNoSecondCredential() throws {
+        var draft = MachineDraft(newMachine: "win")
+        draft.addresses[0].host = "10.0.0.7"
+        draft.addRDPProfile()
+        draft.rdpProfiles[0].gateway.isEnabled = true
+        draft.rdpProfiles[0].gateway.host = "gw.example.com"
+        // Typed before switching back to the desktop account; must not be saved.
+        draft.rdpProfiles[0].gateway.usesDesktopAccount = false
+        draft.rdpProfiles[0].gateway.enteredSecret = "gw55"
+        draft.rdpProfiles[0].gateway.usesDesktopAccount = true
+
+        guard case .batch(let changes) = try draft.change() else {
+            Issue.record("expected a batch")
+            return
+        }
+        let saved = try #require(changes.compactMap { if case .upsertProfile(.rdp(let p)) = $0 { p } else { nil } }.first)
+        #expect(saved.gateway == RDPGateway(host: "gw.example.com"))
+        #expect(changes.allSatisfy { if case .upsertCredential = $0 { false } else { true } })
+        #expect(draft.pendingSecrets.isEmpty)
+    }
+
+    @Test func anEnabledGatewayNeedsAnAddress() {
+        var draft = MachineDraft(newMachine: "win")
+        draft.addresses[0].host = "10.0.0.7"
+        draft.addRDPProfile()
+        draft.rdpProfiles[0].gateway.isEnabled = true
+        #expect(throws: ValidationError.missingGatewayHost(profile: "RDP")) { try draft.change() }
+    }
+
+    @Test func editingKeepsASavedGatewayAndRemovingTheProfileForgetsItsCredential() {
+        let machine = Machine(name: "win")
+        let credential = CredentialReference(label: "gw", kind: .password)
+        let gateway = RDPGateway(host: "gw.example.com", port: 8443, credentials: .separate(username: "dmz-nick", domain: "DMZ", credentialID: credential.id))
+        let rdp = RDPProfile(machineID: machine.id, gateway: gateway)
+        let snapshot = MachineLibrarySnapshot(machines: [machine], addresses: [], profiles: [.rdp(rdp)], credentials: [credential])
+        var draft = MachineDraft(editing: machine, in: snapshot)
+        #expect(draft.rdpProfiles[0].gateway.hasStoredSecret)
+        #expect(draft.rdpProfiles[0].resolvedProfile().gateway == gateway)
+
+        draft.removeProfile(rdp.id)
+
+        #expect(draft.removedCredentialIDs == [credential.id])
+    }
+
     @Test func removingAnRDPProfileForgetsItsCredential() {
         let machine = Machine(name: "win")
         let credential = CredentialReference(label: "x", kind: .password)

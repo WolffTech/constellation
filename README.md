@@ -14,7 +14,7 @@
 Constellation saves your remote machines and opens each session in a tab. It uses [libghostty](https://github.com/ghostty-org/ghostty) for SSH, [FreeRDP](https://github.com/FreeRDP/FreeRDP) for RDP, and [RoyalVNCKit](https://github.com/royalapplications/royalvnc) for VNC.
 
 > [!NOTE]
-> Constellation does not create a VPN or relay traffic. Connect to your LAN, VPN, or Tailscale network before starting a session.
+> Constellation does not create a VPN or relay traffic. Connect to your LAN, VPN, or Tailscale network before starting a session, or point an RDP profile at your organization's Remote Desktop Gateway.
 
 ## What it does
 
@@ -24,6 +24,7 @@ Constellation saves your remote machines and opens each session in a tab. It use
 - Runs SSH sessions in a Metal-rendered terminal that uses your existing OpenSSH configuration, keys, and agent
 - Supports custom terminal fonts, themes, and Ghostty configuration
 - Runs RDP sessions with NLA, HiDPI rendering, shared clipboard text, and a trust store for accepted certificates
+- Reaches RDP machines behind a Remote Desktop Gateway, with the desktop's account or a separate gateway account
 - Opens VNC sessions in Constellation or Apple's Screen Sharing app
 - Stores credentials in the macOS Keychain
 

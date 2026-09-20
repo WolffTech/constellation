@@ -61,6 +61,29 @@ struct GRDBMachineLibraryTests {
         #expect(stored.machineID == machine.id)
     }
 
+    @Test func gatewaysRoundTripAndLoseADeletedCredential() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let machine = Machine(name: "win")
+        let desktop = CredentialReference(label: "desktop", kind: .password)
+        let gatewayCredential = CredentialReference(label: "gateway", kind: .password)
+        let gateway = RDPGateway(host: "gw.example.com", port: 8443, credentials: .separate(username: "dmz-nick", domain: "DMZ", credentialID: gatewayCredential.id))
+        let profile = RDPProfile(machineID: machine.id, credentialID: desktop.id, gateway: gateway)
+        try await library.save(.batch([
+            .upsertMachine(machine), .upsertCredential(desktop), .upsertCredential(gatewayCredential), .upsertProfile(.rdp(profile)),
+        ]))
+        #expect(try await library.snapshot().profiles == [.rdp(profile)])
+        #expect(try await library.snapshot().orphanedCredentials.isEmpty)
+
+        try await library.save(.deleteCredential(gatewayCredential.id))
+
+        guard case .rdp(let stored) = try #require(try await library.snapshot().profile(profile.id)) else {
+            Issue.record("expected an RDP profile")
+            return
+        }
+        #expect(stored.credentialID == desktop.id)
+        #expect(stored.gateway == RDPGateway(host: "gw.example.com", port: 8443, credentials: .separate(username: "dmz-nick", domain: "DMZ", credentialID: nil)))
+    }
+
     @Test func rejectsAddressesForUnknownMachines() async throws {
         let library = try GRDBMachineLibrary.inMemory()
         let orphan = MachineAddress(machineID: MachineID(), label: "LAN", host: "10.0.0.1")

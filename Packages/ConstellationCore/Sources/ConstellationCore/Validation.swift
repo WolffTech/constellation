@@ -12,6 +12,7 @@ public enum ValidationError: Error, Hashable, Sendable, LocalizedError {
     case emptyProfileName
     case missingCredential(profile: String)
     case missingKeyFile(profile: String)
+    case missingGatewayHost(profile: String)
 
     public var errorDescription: String? {
         switch self {
@@ -23,6 +24,7 @@ public enum ValidationError: Error, Hashable, Sendable, LocalizedError {
         case .emptyProfileName: "Give the profile a name."
         case .missingCredential(let profile): "“\(profile)” uses password authentication but has no saved password."
         case .missingKeyFile(let profile): "“\(profile)” uses a key file but no path is set."
+        case .missingGatewayHost(let profile): "“\(profile)” uses a gateway but no gateway address is set."
         }
     }
 }
@@ -75,6 +77,11 @@ public enum Validator {
             default:
                 break
             }
+        }
+        if case .rdp(let rdp) = profile, let gateway = rdp.gateway {
+            if gateway.host.trimmingCharacters(in: .whitespaces).isEmpty { throw .missingGatewayHost(profile: rdp.name) }
+            try validateHost(gateway.host)
+            try validatePort(gateway.port)
         }
     }
 

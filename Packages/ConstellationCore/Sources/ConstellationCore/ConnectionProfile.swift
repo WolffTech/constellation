@@ -136,6 +136,39 @@ public struct VNCProfile: Identifiable, Hashable, Sendable, Codable {
     }
 }
 
+/// How an RDP session signs in to its gateway.
+public enum RDPGatewayCredentials: Hashable, Sendable, Codable {
+    /// The desktop's account also opens the gateway.
+    case sameAsDesktop
+    /// The gateway has its own account, such as one in a DMZ domain.
+    case separate(username: String?, domain: String?, credentialID: CredentialID?)
+}
+
+/// A Remote Desktop Gateway that tunnels the session over HTTPS. The machine's
+/// address is resolved by the gateway, not by this Mac.
+public struct RDPGateway: Hashable, Sendable, Codable {
+    public static let defaultPort = 443
+
+    public var host: String
+    public var port: Int
+    public var credentials: RDPGatewayCredentials
+
+    public init(host: String, port: Int = RDPGateway.defaultPort, credentials: RDPGatewayCredentials = .sameAsDesktop) {
+        self.host = host
+        self.port = port
+        self.credentials = credentials
+    }
+
+    public var credentialID: CredentialID? {
+        if case .separate(_, _, let id) = credentials { id } else { nil }
+    }
+
+    func withoutCredential() -> RDPGateway {
+        guard case .separate(let username, let domain, _) = credentials else { return self }
+        return RDPGateway(host: host, port: port, credentials: .separate(username: username, domain: domain, credentialID: nil))
+    }
+}
+
 public struct RDPProfile: Identifiable, Hashable, Sendable, Codable {
     public let id: ProfileID
     public let machineID: MachineID
@@ -146,6 +179,8 @@ public struct RDPProfile: Identifiable, Hashable, Sendable, Codable {
     public var addressSelection: AddressSelection
     public var credentialID: CredentialID?
     public var sharesClipboard: Bool
+    /// `nil` connects directly.
+    public var gateway: RDPGateway?
 
     public init(
         id: ProfileID = ProfileID(),
@@ -156,7 +191,8 @@ public struct RDPProfile: Identifiable, Hashable, Sendable, Codable {
         port: Int = 3389,
         addressSelection: AddressSelection = .automatic,
         credentialID: CredentialID? = nil,
-        sharesClipboard: Bool = false
+        sharesClipboard: Bool = false,
+        gateway: RDPGateway? = nil
     ) {
         self.id = id
         self.machineID = machineID
@@ -167,6 +203,7 @@ public struct RDPProfile: Identifiable, Hashable, Sendable, Codable {
         self.addressSelection = addressSelection
         self.credentialID = credentialID
         self.sharesClipboard = sharesClipboard
+        self.gateway = gateway
     }
 }
 
@@ -268,12 +305,30 @@ public enum ConnectionProfile: Identifiable, Hashable, Sendable, Codable {
         }
     }
 
-    /// The same profile with no Keychain reference, for export.
+    /// Every Keychain reference the profile holds: its own and, for RDP, the gateway's.
+    public var credentialIDs: [CredentialID] {
+        var ids = credentialID.map { [$0] } ?? []
+        if case .rdp(let p) = self, let id = p.gateway?.credentialID { ids.append(id) }
+        return ids
+    }
+
+    /// The same profile with no Keychain references, for export.
     public func withoutCredential() -> ConnectionProfile {
+        removingCredentials { _ in true }
+    }
+
+    /// The same profile without the Keychain references `isRemoved` matches.
+    public func removingCredentials(where isRemoved: (CredentialID) -> Bool) -> ConnectionProfile {
+        func kept(_ id: CredentialID?) -> CredentialID? {
+            id.flatMap { isRemoved($0) ? nil : $0 }
+        }
         switch self {
-        case .ssh(var p): p.credentialID = nil; return .ssh(p)
-        case .vnc(var p): p.credentialID = nil; return .vnc(p)
-        case .rdp(var p): p.credentialID = nil; return .rdp(p)
+        case .ssh(var p): p.credentialID = kept(p.credentialID); return .ssh(p)
+        case .vnc(var p): p.credentialID = kept(p.credentialID); return .vnc(p)
+        case .rdp(var p):
+            p.credentialID = kept(p.credentialID)
+            if let id = p.gateway?.credentialID, isRemoved(id) { p.gateway = p.gateway?.withoutCredential() }
+            return .rdp(p)
         case .appleScreenSharing: return self
         }
     }
