@@ -58,7 +58,8 @@ runs:
         path: |
           Vendor/build/freerdp
           .tools/openssl-*.tar.gz
-        key: freerdp-v2-${{ runner.arch }}-${{ steps.keys.outputs.xcode }}-${{ steps.keys.outputs.freerdp }}-${{ hashFiles('Scripts/build-freerdp.sh', 'Scripts/build-openssl.sh') }}
+          .tools/cjson-*.tar.gz
+        key: freerdp-v2-${{ runner.arch }}-${{ steps.keys.outputs.xcode }}-${{ steps.keys.outputs.freerdp }}-${{ hashFiles('Scripts/build-freerdp.sh', 'Scripts/build-openssl.sh', 'Scripts/build-cjson.sh') }}
 
     - name: Build FreeRDP
       if: steps.freerdp.outputs.cache-hit != 'true'
@@ -79,3 +80,5 @@ runs:
         compgen -G "$HOME/.cache/zig/p/*.tar.gz" > /dev/null
         openssl_version="$(sed -n 's/^OPENSSL_VERSION="\([^"]*\)"/\1/p' Scripts/build-openssl.sh)"
         test -f ".tools/openssl-$openssl_version.tar.gz"
+        cjson_version="$(sed -n 's/^CJSON_VERSION="\([^"]*\)"/\1/p' Scripts/build-cjson.sh)"
+        test -f ".tools/cjson-$cjson_version.tar.gz"
