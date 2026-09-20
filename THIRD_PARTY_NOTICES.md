@@ -33,6 +33,15 @@ TLS and cryptography for RDP, linked statically into the FreeRDP kit.
 - License: Apache-2.0
 - License text: [`openssl.txt`](App/Licenses/openssl.txt)
 
+## cJSON
+
+JSON parsing behind FreeRDP's Entra ID sign-in and Azure Virtual Desktop transport, linked statically into the FreeRDP kit.
+
+- Upstream: [https://github.com/DaveGamble/cJSON](https://github.com/DaveGamble/cJSON)
+- Version: 1.7.19
+- License: MIT
+- License text: [`cjson.txt`](App/Licenses/cjson.txt)
+
 ## MD4 and MD5 (Solar Designer)
 
 Hash implementations WinPR compiles in so NTLM authentication does not need OpenSSL's legacy provider.

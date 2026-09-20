@@ -7,7 +7,7 @@
 Run after bumping a dependency, after the native kits have been built (the
 Zig package cache and the SwiftPM checkouts must exist). Sources are the
 submodules, Zig's package cache (matched by a file each package is known to
-contain, not by hash), the SwiftPM checkouts, the pinned OpenSSL build, and — for
+contain, not by hash), the SwiftPM checkouts, the pinned OpenSSL and cJSON builds, and — for
 the few packages that ship no license file — the upstream text over HTTPS.
 """
 import glob
@@ -98,6 +98,7 @@ ghostty_commit = run("git", "-C", "Vendor/ghostty", "rev-parse", "--short", "HEA
 freerdp_tag = run("git", "-C", "Vendor/freerdp", "describe", "--tags")
 openssl_prefix = os.path.join(ROOT, "Vendor", "build", "openssl")
 openssl_version = run(os.path.join(openssl_prefix, "bin", "openssl"), "version").split()[1]
+cjson_version = re.search(r'^CJSON_VERSION="([^"]+)"', read("Scripts/build-cjson.sh"), re.M).group(1)
 
 GHOSTTY = "https://github.com/ghostty-org/ghostty"
 
@@ -112,6 +113,9 @@ NOTICES = [
     ("openssl", "OpenSSL", openssl_version, "Apache-2.0", "https://openssl-library.org",
      "TLS and cryptography for RDP, linked statically into the FreeRDP kit.",
      lambda: read(os.path.join(openssl_prefix, "LICENSE.txt"))),
+    ("cjson", "cJSON", cjson_version, "MIT", "https://github.com/DaveGamble/cJSON",
+     "JSON parsing behind FreeRDP's Entra ID sign-in and Azure Virtual Desktop transport, linked statically into the FreeRDP kit.",
+     lambda: read("Vendor/build/cjson/LICENSE")),
     ("md4-md5", "MD4 and MD5 (Solar Designer)", "bundled with WinPR", "Public domain", "https://openwall.info/wiki/people/solar/software/public-domain-source-code/md5",
      "Hash implementations WinPR compiles in so NTLM authentication does not need OpenSSL's legacy provider.",
      lambda: leading_comment("Vendor/freerdp/winpr/libwinpr/crypto/md5.c")),
