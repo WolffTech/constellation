@@ -524,6 +524,7 @@ private struct RDPProfileForm: View {
     /// The file also gives the machine an address, so the editor applies it.
     let onImportAzureVirtualDesktop: (AVDConnectionFile) -> Void
     @State private var importError: String?
+    @State private var isBrowsingWorkspace = false
 
     var body: some View {
         Form {
@@ -550,7 +551,7 @@ private struct RDPProfileForm: View {
                     LabeledContent("Gateway", value: "\(draft.gateway.host):\(draft.gateway.port)")
                     if let tenant = resource.tenantID { LabeledContent("Tenant", value: tenant) }
                     LabeledContent("Desktop sign-in", value: resource.usesEntraDesktopSignIn ? "Microsoft Entra ID" : "Username and password")
-                    Button("Replace Connection File…", action: importAzureVirtualDesktop)
+                    azureVirtualDesktopSources
                     Button("Remove Azure Virtual Desktop", role: .destructive) {
                         draft.gateway = RDPGatewayDraft()
                     }
@@ -585,19 +586,46 @@ private struct RDPProfileForm: View {
                     }
                 }
                 Section {
-                    Button("Import Connection File…", action: importAzureVirtualDesktop)
+                    azureVirtualDesktopSources
                 } header: {
                     Text("Azure Virtual Desktop")
                 } footer: {
-                    Text("Download the desktop's .rdp file from the Azure Virtual Desktop web client, under Settings › Download the rdp file.")
+                    Text("Sign in with your work account to pick one of your desktops, the way the Windows App does with a workspace address. A connection file downloaded from the Azure Virtual Desktop web client works too.")
                 }
             }
         }
         .formStyle(.grouped)
-        .alert("The connection file could not be imported", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
+        .alert("Azure Virtual Desktop could not be set up", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
             Button("OK") { importError = nil }
         } message: {
             Text(importError ?? "")
+        }
+    }
+
+    @ViewBuilder private var azureVirtualDesktopSources: some View {
+        HStack {
+            Button("Sign In and Choose a Desktop…", action: browseWorkspace)
+                .disabled(isBrowsingWorkspace)
+            if isBrowsingWorkspace { ProgressView().controlSize(.small) }
+        }
+        Button("Import Connection File…", action: importAzureVirtualDesktop)
+    }
+
+    private func browseWorkspace() {
+        isBrowsingWorkspace = true
+        let hint = draft.profile.username.flatMap { $0.contains("@") ? $0 : nil }
+        Task {
+            defer { isBrowsingWorkspace = false }
+            do {
+                let client = AVDFeedClient()
+                let desktops = try await client.desktops(loginHint: hint)
+                guard let desktop = AVDDesktopPicker.ask(desktops) else { return }
+                onImportAzureVirtualDesktop(try await client.connectionFile(for: desktop))
+            } catch AVDFeedClientError.signInCancelled {
+                // Closing the sign-in window is an answer, not an error.
+            } catch {
+                importError = error.localizedDescription
+            }
         }
     }
 
@@ -657,5 +685,27 @@ private struct SecretRow: View {
                 }
             }
         }
+    }
+}
+
+/// Native dialog for choosing among the desktops a workspace offers.
+@MainActor
+enum AVDDesktopPicker {
+    static func ask(_ desktops: [AVDFeed.Desktop]) -> AVDFeed.Desktop? {
+        let alert = NSAlert()
+        alert.messageText = "Choose a desktop"
+        alert.informativeText = "These are the Azure Virtual Desktop desktops assigned to the account you signed in with."
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 26))
+        popup.setAccessibilityLabel("Desktop")
+        // Titles may repeat across tenants, and a pop-up drops duplicate titles.
+        for desktop in desktops {
+            let item = NSMenuItem(title: [desktop.title, desktop.tenantName].compactMap(\.self).joined(separator: " — "), action: nil, keyEquivalent: "")
+            popup.menu?.addItem(item)
+        }
+        alert.accessoryView = popup
+        alert.addButton(withTitle: "Choose")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn, desktops.indices.contains(popup.indexOfSelectedItem) else { return nil }
+        return desktops[popup.indexOfSelectedItem]
     }
 }
