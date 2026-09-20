@@ -28,8 +28,9 @@ protocol RDPSessionDriving: AnyObject {
 /// Starts FreeRDP sessions. NLA needs the account and password before the
 /// connection opens, so anything the profile and vault cannot supply is asked
 /// for up front, for the desktop first and then for a gateway with its own
-/// account; certificates are confirmed while FreeRDP waits. App-wide RDP
-/// settings are read as each session starts.
+/// account; certificates are confirmed while FreeRDP waits, and so is an Entra
+/// ID sign-in for Azure Virtual Desktop. App-wide RDP settings are read as each
+/// session starts.
 @MainActor
 final class FreeRDPSessionDriver: RDPSessionDriving {
     private let vault: any CredentialVault
@@ -37,19 +38,22 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
     private let settings: @MainActor () -> RDPSettings
     private let credentialPrompt: @MainActor (RDPCredentialPrompt) -> RDPCredentialEntry?
     private let certificatePrompt: @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision
+    private let entraSignInPrompt: @MainActor @Sendable (RDPEntraSignInRequest, String) async -> String?
 
     init(
         vault: any CredentialVault,
         trustStore: any TrustStore,
         settings: @escaping @MainActor () -> RDPSettings = { .default },
         credentialPrompt: @escaping @MainActor (RDPCredentialPrompt) -> RDPCredentialEntry? = RDPCredentialPrompter.ask,
-        certificatePrompt: @escaping @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision = RDPCertificatePrompter.ask
+        certificatePrompt: @escaping @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision = RDPCertificatePrompter.ask,
+        entraSignInPrompt: @escaping @MainActor @Sendable (RDPEntraSignInRequest, String) async -> String? = RDPEntraSignInPrompter.ask
     ) {
         self.vault = vault
         self.trustStore = trustStore
         self.settings = settings
         self.credentialPrompt = credentialPrompt
         self.certificatePrompt = certificatePrompt
+        self.entraSignInPrompt = entraSignInPrompt
     }
 
     func start(_ request: RDPSessionRequest) throws -> any RemoteDesktopSession {
@@ -57,7 +61,9 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         var domain = request.domain ?? ""
         var password = request.credentialID.flatMap { try? vault.retrieve(id: $0) }?.withValue { $0 }
 
-        if username.isEmpty || password == nil {
+        // A desktop that signs in with Entra ID takes no password.
+        let needsPassword = request.gateway?.azureVirtualDesktop?.usesEntraDesktopSignIn != true
+        if needsPassword, username.isEmpty || password == nil {
             guard let entry = credentialPrompt(RDPCredentialPrompt(
                 machineName: request.machineName,
                 username: request.username,
@@ -81,7 +87,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         let configuration = RDPSessionConfiguration(
             host: request.host,
             port: request.port,
-            username: username,
+            username: username.isEmpty ? nil : username,
             domain: domain.isEmpty ? nil : domain,
             width: settings.desktopWidth,
             height: settings.desktopHeight,
@@ -92,13 +98,15 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         let certificatePrompt = self.certificatePrompt
         let trustStore = self.trustStore
         let machineName = request.machineName
+        let entraSignInPrompt = self.entraSignInPrompt
         let session = RDPSession(
             configuration: configuration,
             password: { password },
             gatewayPassword: { [gatewayPassword] in gatewayPassword },
             verifyCertificate: { certificate in
                 await resolveCertificate(certificate, machineName: machineName, trustStore: trustStore, prompt: certificatePrompt)
-            })
+            },
+            entraSignIn: { request in await entraSignInPrompt(request, machineName) })
         session.displayMode = settings.defaultDisplayMode
         return session
     }
@@ -109,8 +117,14 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         for gateway: RDPGateway,
         machineName: String
     ) throws -> (RDPGatewayConfiguration.Account, password: String?) {
-        guard case .separate(let savedUsername, let savedDomain, let credentialID) = gateway.credentials else {
+        let savedUsername: String?, savedDomain: String?, credentialID: CredentialID?
+        switch gateway.credentials {
+        case .sameAsDesktop:
             return (.sameAsDesktop, nil)
+        case .azureVirtualDesktop(let resource):
+            return (.azureVirtualDesktop(RDPAzureVirtualDesktopResource(resource)), nil)
+        case .separate(let username, let domain, let id):
+            (savedUsername, savedDomain, credentialID) = (username, domain, id)
         }
         var username = savedUsername ?? ""
         var domain = savedDomain ?? ""
@@ -128,6 +142,22 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
             if let entered = entry.password { password = entered }
         }
         return (.separate(username: username, domain: domain.isEmpty ? nil : domain), password)
+    }
+}
+
+private extension RDPAzureVirtualDesktopResource {
+    init(_ resource: AVDResource) {
+        self.init(
+            endpointPool: resource.endpointPool,
+            geo: resource.geo,
+            armPath: resource.armPath,
+            tenantID: resource.tenantID,
+            diagnosticServiceURL: resource.diagnosticServiceURL,
+            hubDiscoveryURL: resource.hubDiscoveryURL,
+            activityHint: resource.activityHint,
+            loadBalanceInfo: resource.loadBalanceInfo,
+            application: resource.application,
+            usesEntraDesktopSignIn: resource.usesEntraDesktopSignIn)
     }
 }
 
