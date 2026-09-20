@@ -514,6 +514,7 @@ final class SessionCoordinator {
                         domain: rdp.domain,
                         credentialID: rdp.credentialID,
                         sharesClipboard: rdp.sharesClipboard,
+                        gateway: rdp.gateway,
                         machineName: summary.machineName ?? summary.title),
                     for: sessionID,
                     attempt: attempt)
@@ -545,7 +546,9 @@ final class SessionCoordinator {
     }
 
     /// Pinned address, or the first one in priority order that accepts a TCP
-    /// connection. Exactly one address reaches a driver.
+    /// connection. Exactly one address reaches a driver. Behind an RD Gateway
+    /// only the gateway can reach the machine, so nothing is probed and the
+    /// first address is used.
     private func resolveAddress(
         for profile: ConnectionProfile,
         machineID: MachineID,
@@ -561,6 +564,9 @@ final class SessionCoordinator {
         guard !addresses.isEmpty else {
             fail(sessionID, attempt: attempt, with: .noAddress)
             return nil
+        }
+        if case .rdp(let rdp) = profile, rdp.gateway != nil {
+            return addresses[0]
         }
         for address in addresses {
             guard attempts[sessionID] == attempt else { return nil }

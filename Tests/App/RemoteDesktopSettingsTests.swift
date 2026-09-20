@@ -83,4 +83,49 @@ struct RemoteDesktopSettingsTests {
             width: 1920, height: 1080, dynamicResolution: false, sharesClipboard: true, connectionQuality: .lan))
         #expect(session.displayMode == .actualSize)
     }
+
+    @Test func rdpDriverAsksForAGatewayAccountTheProfileLacks() throws {
+        let vault = InMemoryCredentialVault()
+        let desktopCredential = CredentialID()
+        try vault.store(Secret("pa55"), for: desktopCredential)
+        var prompts: [RDPCredentialPrompt] = []
+        let driver = FreeRDPSessionDriver(
+            vault: vault,
+            trustStore: InMemoryTrustStore(),
+            credentialPrompt: { prompt in
+                prompts.append(prompt)
+                return RDPCredentialEntry(username: "dmz-nick", domain: "DMZ", password: "gw55")
+            },
+            certificatePrompt: { _, _, _ in .reject })
+        let gateway = RDPGateway(host: "gw.example.com", port: 8443, credentials: .separate(username: nil, domain: nil, credentialID: nil))
+
+        let session = try #require(driver.start(RDPSessionRequest(
+            host: "win.corp.internal", port: 3389, username: "nick", domain: nil, credentialID: desktopCredential,
+            sharesClipboard: false, gateway: gateway, machineName: "win")) as? RDPSession)
+
+        // The desktop account is complete, so only the gateway's is asked for.
+        #expect(prompts == [RDPCredentialPrompt(machineName: "win", username: nil, domain: nil, hasStoredPassword: false, gatewayHost: "gw.example.com")])
+        #expect(session.configuration.gateway == RDPGatewayConfiguration(
+            host: "gw.example.com", port: 8443, account: .separate(username: "dmz-nick", domain: "DMZ")))
+    }
+
+    @Test func rdpDriverReusesTheDesktopAccountForTheGatewayWithoutPrompting() throws {
+        let vault = InMemoryCredentialVault()
+        let desktopCredential = CredentialID()
+        try vault.store(Secret("pa55"), for: desktopCredential)
+        let driver = FreeRDPSessionDriver(
+            vault: vault,
+            trustStore: InMemoryTrustStore(),
+            credentialPrompt: { _ in
+                Issue.record("nothing is missing, so nothing should be asked")
+                return nil
+            },
+            certificatePrompt: { _, _, _ in .reject })
+
+        let session = try #require(driver.start(RDPSessionRequest(
+            host: "win.corp.internal", port: 3389, username: "nick", domain: nil, credentialID: desktopCredential,
+            sharesClipboard: false, gateway: RDPGateway(host: "gw.example.com"), machineName: "win")) as? RDPSession)
+
+        #expect(session.configuration.gateway == RDPGatewayConfiguration(host: "gw.example.com", port: 443, account: .sameAsDesktop))
+    }
 }

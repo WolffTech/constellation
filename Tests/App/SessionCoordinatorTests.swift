@@ -480,6 +480,29 @@ struct SessionCoordinatorTests {
         #expect(coordinator.sessions.first?.state == .failed(.authenticationFailed("Authentication failed.")))
     }
 
+    @Test func gatewayProfilesConnectWithoutProbingTheMachine() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let machine = Machine(name: "win")
+        let address = MachineAddress(machineID: machine.id, label: "", host: "win.corp.internal")
+        let gateway = RDPGateway(host: "gw.example.com")
+        let profile = RDPProfile(machineID: machine.id, username: "nick", gateway: gateway)
+        try await library.save(.batch([.upsertMachine(machine), .upsertAddress(address), .upsertProfile(.rdp(profile))]))
+        let rdpDriver = StubRDPDriver()
+        let coordinator = SessionCoordinator(
+            library: library,
+            // Only the gateway can reach the machine.
+            prober: StubProber(results: ["win.corp.internal": false]),
+            driver: StubSSHDriver(),
+            localDriver: StubLocalTerminalDriver(),
+            rdpDriver: rdpDriver)
+
+        _ = try await coordinator.open(profileID: profile.id)
+
+        #expect(rdpDriver.requests.last == RDPSessionRequest(
+            host: "win.corp.internal", port: 3389, username: "nick", domain: nil, credentialID: nil,
+            sharesClipboard: false, gateway: gateway, machineName: "win"))
+    }
+
     @Test func cancellingTheRDPCredentialPromptLeavesTheTabDisconnected() async throws {
         let library = try GRDBMachineLibrary.inMemory()
         let machine = Machine(name: "win")
