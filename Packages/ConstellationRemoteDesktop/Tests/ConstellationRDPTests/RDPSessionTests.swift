@@ -18,6 +18,7 @@ struct RDPSessionTests {
         #expect(RDPSession.failure(from: CRDP_FAILURE_TLS)?.message == RDPSession.tlsFailureMessage)
         #expect(RDPSession.failure(from: CRDP_FAILURE_CONNECT)?.message == RDPSession.connectFailureMessage)
         #expect(RDPSession.failure(from: CRDP_FAILURE_SIGN_IN)?.message == RDPSession.signInFailureMessage)
+        #expect(RDPSession.failure(from: CRDP_FAILURE_DESKTOP_SIGN_IN_REFUSED)?.message == RDPSession.desktopSignInRefusedMessage)
         #expect(RDPSession.failure(from: CRDP_FAILURE_GENERIC)?.isAuthenticationFailure == false)
     }
 

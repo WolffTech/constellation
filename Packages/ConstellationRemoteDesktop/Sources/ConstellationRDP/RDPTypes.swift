@@ -198,6 +198,23 @@ public enum RDPConnectionQuality: String, Sendable, Codable, CaseIterable {
     case modem
 }
 
+/// The account a desktop signs in with.
+public struct RDPDesktopCredentials: Sendable, Equatable {
+    public var username: String
+    public var domain: String?
+    public var password: String
+
+    public init(username: String, domain: String? = nil, password: String) {
+        self.username = username
+        self.domain = domain
+        self.password = password
+    }
+}
+
+/// Asked when a desktop refuses the Entra ID sign-in its connection file
+/// promised and wants an account instead. Returning `nil` gives up.
+public typealias RDPDesktopCredentialsProvider = @MainActor @Sendable () async -> RDPDesktopCredentials?
+
 /// Resolves the account password (from Keychain in the app). Returning `nil`
 /// aborts before connecting.
 public typealias RDPPasswordProvider = @MainActor @Sendable () async -> String?

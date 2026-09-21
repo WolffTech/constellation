@@ -99,6 +99,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         let trustStore = self.trustStore
         let machineName = request.machineName
         let entraSignInPrompt = self.entraSignInPrompt
+        let credentialPrompt = self.credentialPrompt
         let session = RDPSession(
             configuration: configuration,
             password: { password },
@@ -106,7 +107,22 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
             verifyCertificate: { certificate in
                 await resolveCertificate(certificate, machineName: machineName, trustStore: trustStore, prompt: certificatePrompt)
             },
-            entraSignIn: { request in await entraSignInPrompt(request, machineName) })
+            entraSignIn: { request in await entraSignInPrompt(request, machineName) },
+            // Only a desktop that refuses its Entra ID sign-in gets here; the
+            // account was not asked for up front.
+            desktopCredentials: { [username, domain, password] in
+                if !username.isEmpty, let password {
+                    return RDPDesktopCredentials(username: username, domain: domain.isEmpty ? nil : domain, password: password)
+                }
+                guard let entry = credentialPrompt(RDPCredentialPrompt(
+                    machineName: machineName,
+                    username: username.isEmpty ? nil : username,
+                    domain: domain.isEmpty ? nil : domain,
+                    hasStoredPassword: password != nil)),
+                    let entered = entry.password ?? password
+                else { return nil }
+                return RDPDesktopCredentials(username: entry.username, domain: entry.domain.isEmpty ? nil : entry.domain, password: entered)
+            })
         session.displayMode = settings.defaultDisplayMode
         return session
     }
