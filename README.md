@@ -25,6 +25,7 @@ Constellation saves your remote machines and opens each session in a tab. It use
 - Supports custom terminal fonts, themes, and Ghostty configuration
 - Runs RDP sessions with NLA, HiDPI rendering, shared clipboard text, and a trust store for accepted certificates
 - Reaches RDP machines behind a Remote Desktop Gateway, with the desktop's account or a separate gateway account
+- Connects to Azure Virtual Desktop: sign in with your work account to pick a desktop from your workspace, or import its connection file
 - Opens VNC sessions in Constellation or Apple's Screen Sharing app
 - Stores credentials in the macOS Keychain
 
@@ -57,7 +58,7 @@ xcodegen generate
 open Constellation.xcodeproj
 ```
 
-The build scripts download the pinned Zig and OpenSSL versions, then compile the pinned Ghostty and FreeRDP versions.
+The build scripts download the pinned Zig, OpenSSL and cJSON versions, then compile the pinned Ghostty and FreeRDP versions.
 
 Forks that distribute their own builds must replace `SUFeedURL` and `SUPublicEDKey` in `project.yml`. Otherwise, those builds will check Constellation's official update feed and trust its release signatures.
 

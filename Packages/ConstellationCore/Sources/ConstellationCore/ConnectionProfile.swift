@@ -142,6 +142,10 @@ public enum RDPGatewayCredentials: Hashable, Sendable, Codable {
     case sameAsDesktop
     /// The gateway has its own account, such as one in a DMZ domain.
     case separate(username: String?, domain: String?, credentialID: CredentialID?)
+    /// An Azure Virtual Desktop gateway: the user signs in to Entra ID in a
+    /// browser sheet, and the gateway brokers `resource` rather than the
+    /// machine's address.
+    case azureVirtualDesktop(AVDResource)
 }
 
 /// A Remote Desktop Gateway that tunnels the session over HTTPS. The machine's
@@ -161,6 +165,10 @@ public struct RDPGateway: Hashable, Sendable, Codable {
 
     public var credentialID: CredentialID? {
         if case .separate(_, _, let id) = credentials { id } else { nil }
+    }
+
+    public var azureVirtualDesktop: AVDResource? {
+        if case .azureVirtualDesktop(let resource) = credentials { resource } else { nil }
     }
 
     func withoutCredential() -> RDPGateway {

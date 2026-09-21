@@ -24,6 +24,14 @@
     "file": "openssl.txt"
   },
   {
+    "name": "cJSON",
+    "version": "1.7.19",
+    "license": "MIT",
+    "url": "https://github.com/DaveGamble/cJSON",
+    "summary": "JSON parsing behind FreeRDP's Entra ID sign-in and Azure Virtual Desktop transport, linked statically into the FreeRDP kit.",
+    "file": "cjson.txt"
+  },
+  {
     "name": "MD4 and MD5 (Solar Designer)",
     "version": "bundled with WinPR",
     "license": "Public domain",

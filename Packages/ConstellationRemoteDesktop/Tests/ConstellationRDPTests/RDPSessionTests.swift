@@ -17,6 +17,7 @@ struct RDPSessionTests {
         #expect(RDPSession.failure(from: CRDP_FAILURE_DNS)?.message == RDPSession.dnsFailureMessage)
         #expect(RDPSession.failure(from: CRDP_FAILURE_TLS)?.message == RDPSession.tlsFailureMessage)
         #expect(RDPSession.failure(from: CRDP_FAILURE_CONNECT)?.message == RDPSession.connectFailureMessage)
+        #expect(RDPSession.failure(from: CRDP_FAILURE_SIGN_IN)?.message == RDPSession.signInFailureMessage)
         #expect(RDPSession.failure(from: CRDP_FAILURE_GENERIC)?.isAuthenticationFailure == false)
     }
 
@@ -58,6 +59,50 @@ struct RDPSessionTests {
         #expect(failure?.message == RDPSession.connectFailureMessage, "got \(String(describing: failure))")
     }
 
+    /// Drives the Azure Virtual Desktop settings through FreeRDP's ARM
+    /// transport. The gateway is reached before any token is asked for, so an
+    /// unreachable one must fail without showing a sign-in page.
+    @Test func anUnreachableAzureVirtualDesktopGatewayFailsBeforeSignIn() async {
+        let resource = RDPAzureVirtualDesktopResource(
+            endpointPool: "11112222-0815-1234-abcd-123456789abc",
+            geo: "EU",
+            armPath: "/subscriptions/s/resourcegroups/g/providers/Microsoft.DesktopVirtualization/hostpools/p",
+            tenantID: "77064fd5-2634-4a0d-b310-2fa3c1d0472d",
+            loadBalanceInfo: "mth://localhost/pool/resource",
+            application: "||resource")
+        let configuration = RDPSessionConfiguration(
+            host: "rdgateway.invalid", username: "tester", width: 640, height: 480,
+            gateway: RDPGatewayConfiguration(host: "127.0.0.1", port: 1, account: .azureVirtualDesktop(resource)))
+        let signInShown = SignInFlag()
+        let session = RDPSession(
+            configuration: configuration,
+            password: { "unused" },
+            verifyCertificate: { _ in .acceptOnce },
+            entraSignIn: { _ in
+                signInShown.value = true
+                return nil
+            })
+
+        let stream = AsyncStream<RemoteDesktopSessionState>.makeStream()
+        session.eventHandler = { event in
+            if case .stateChanged(let state) = event, !state.isLive, state != .idle {
+                stream.continuation.yield(state)
+            }
+        }
+        session.connect()
+
+        let terminal = await withTimeout(seconds: 15) {
+            for await state in stream.stream { return state }
+            return nil
+        }
+        guard case .disconnected(let failure) = terminal else {
+            Issue.record("expected a disconnected state, got \(String(describing: terminal))")
+            return
+        }
+        #expect(failure != nil)
+        #expect(!signInShown.value)
+    }
+
     @Test func releasingWhileConnectingIgnoresQueuedCallbacks() async {
         let passwordRequested = AsyncStream<Void>.makeStream()
         let configuration = RDPSessionConfiguration(
@@ -95,4 +140,9 @@ struct RDPSessionTests {
             return result
         }
     }
+}
+
+@MainActor
+private final class SignInFlag {
+    var value = false
 }

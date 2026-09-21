@@ -39,6 +39,7 @@
 #include <os/log.h>
 
 #include <pthread.h>
+#include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -96,6 +97,10 @@ struct crdp_session {
     bool cliprdr_ready;            // MonitorReady seen; format lists accepted now
     char *local_text;              // UTF-8 the local pasteboard offers; served on request
     volatile bool connected;
+    // Why an Entra ID sign-in produced no token. FreeRDP reports both as a
+    // plain connect failure, so the client thread reads these instead.
+    bool sign_in_cancelled;
+    bool sign_in_failed;
     // Tracks the buffer the Swift side last saw, so a GFX ResetGraphics realloc
     // is reported as a resize rather than an update against a stale pointer.
     const uint8_t *last_gfx_buffer;
@@ -701,6 +706,65 @@ static DWORD crdp_verify_changed_certificate_ex(freerdp *instance, const char *h
                                        new_fingerprint, TRUE, flags);
 }
 
+// MARK: - Entra ID sign-in
+
+// Same flow as FreeRDP's SDL client: FreeRDP builds the authorize URL, the app
+// shows it and hands back the code from the redirect, and FreeRDP trades the
+// code for the token. `scope` and `req_cnf` are set for a desktop's own Entra
+// sign-in and NULL for the Azure Virtual Desktop gateway.
+static BOOL crdp_entra_token(freerdp *instance, const char *scope, const char *req_cnf, char **token) {
+    crdp_session *session = ((crdpContext *)instance->context)->session;
+    rdpClientContext *client = (rdpClientContext *)instance->context;
+    *token = NULL;
+    if (!session->callbacks.entra_sign_in)
+        return FALSE;
+
+    char *authorize_url = scope
+        ? freerdp_client_get_aad_url(client, FREERDP_CLIENT_AAD_AUTH_REQUEST, scope)
+        : freerdp_client_get_aad_url(client, FREERDP_CLIENT_AAD_AVD_AUTH_REQUEST);
+    if (!authorize_url)
+        return FALSE;
+    char *code = session->callbacks.entra_sign_in(session->callbacks.context, authorize_url);
+    free(authorize_url);
+    if (!code) {
+        session->sign_in_cancelled = true;
+        return FALSE;
+    }
+
+    char *token_request = scope
+        ? freerdp_client_get_aad_url(client, FREERDP_CLIENT_AAD_TOKEN_REQUEST, scope, code, req_cnf)
+        : freerdp_client_get_aad_url(client, FREERDP_CLIENT_AAD_AVD_TOKEN_REQUEST, code);
+    free(code);
+    BOOL ok = token_request && client_common_get_access_token(instance, token_request, token) && *token;
+    free(token_request);
+    if (!ok)
+        session->sign_in_failed = true;
+    return ok;
+}
+
+// Replaces client-common's default, which prints the URL and reads stdin.
+static BOOL crdp_get_access_token(freerdp *instance, AccessTokenType type, char **token,
+                                  size_t count, ...) {
+    switch (type) {
+        case ACCESS_TOKEN_TYPE_AVD:
+            return crdp_entra_token(instance, NULL, NULL, token);
+        case ACCESS_TOKEN_TYPE_AAD: {
+            if (count < 2)
+                return FALSE;
+            va_list ap;
+            va_start(ap, count);
+            const char *scope = va_arg(ap, const char *);
+            const char *req_cnf = va_arg(ap, const char *);
+            va_end(ap);
+            if (!scope || !req_cnf)
+                return FALSE;
+            return crdp_entra_token(instance, scope, req_cnf, token);
+        }
+        default:
+            return FALSE;
+    }
+}
+
 // MARK: - Command execution (client thread only)
 
 // Runs a resolution request now that we are on the client thread. Holds it
@@ -765,6 +829,10 @@ static DWORD WINAPI crdp_client_thread(LPVOID param) {
 
     if (!freerdp_connect(instance)) {
         crdp_failure failure = map_failure(freerdp_get_last_error(context));
+        if (session->sign_in_cancelled)
+            failure = CRDP_FAILURE_CANCELLED;
+        else if (session->sign_in_failed)
+            failure = CRDP_FAILURE_SIGN_IN;
         emit_state(session, CRDP_STATE_DISCONNECTED,
                    failure == CRDP_FAILURE_NONE ? CRDP_FAILURE_GENERIC : failure);
         return 0;
@@ -837,6 +905,7 @@ static BOOL crdp_client_new(freerdp *instance, rdpContext *context) {
     instance->AuthenticateEx = crdp_authenticate_ex;
     instance->VerifyCertificateEx = crdp_verify_certificate_ex;
     instance->VerifyChangedCertificateEx = crdp_verify_changed_certificate_ex;
+    instance->GetAccessToken = crdp_get_access_token;
 
     cctx->stop_event = CreateEvent(NULL, TRUE, FALSE, NULL);
     cctx->command_event = CreateEvent(NULL, FALSE, FALSE, NULL);
@@ -937,6 +1006,31 @@ crdp_session *crdp_session_create(const crdp_config *config, const crdp_callback
         if (!freerdp_set_gateway_usage_method(settings, TSC_PROXY_MODE_DIRECT))
             os_log_error(crdp_oslog(), "rdp gateway not enabled");
     }
+    // Same settings as xfreerdp's /gateway:type:arm with an Azure Virtual
+    // Desktop connection file.
+    const crdp_avd *avd = config->gateway_host ? config->avd : NULL;
+    if (avd) {
+        freerdp_settings_set_bool(settings, FreeRDP_GatewayRpcTransport, FALSE);
+        freerdp_settings_set_bool(settings, FreeRDP_GatewayHttpTransport, FALSE);
+        freerdp_settings_set_bool(settings, FreeRDP_GatewayHttpUseWebsockets, FALSE);
+        freerdp_settings_set_bool(settings, FreeRDP_GatewayArmTransport, TRUE);
+        freerdp_settings_set_string(settings, FreeRDP_GatewayAvdWvdEndpointPool, avd->endpoint_pool);
+        freerdp_settings_set_string(settings, FreeRDP_GatewayAvdGeo, avd->geo);
+        freerdp_settings_set_string(settings, FreeRDP_GatewayAvdArmpath, avd->arm_path);
+        // Without a tenant the sign-in page stays on FreeRDP's "common" default.
+        if (avd->tenant_id)
+            freerdp_settings_set_string(settings, FreeRDP_GatewayAvdAadtenantid, avd->tenant_id);
+        freerdp_settings_set_string(settings, FreeRDP_GatewayAvdDiagnosticserviceurl, avd->diagnostic_service_url);
+        freerdp_settings_set_string(settings, FreeRDP_GatewayAvdHubdiscoverygeourl, avd->hub_discovery_url);
+        freerdp_settings_set_string(settings, FreeRDP_GatewayAvdActivityhint, avd->activity_hint);
+        if (avd->load_balance_info)
+            freerdp_settings_set_pointer_len(settings, FreeRDP_LoadBalanceInfo, avd->load_balance_info,
+                                             strlen(avd->load_balance_info));
+        if (avd->application)
+            freerdp_settings_set_string(settings, FreeRDP_RemoteApplicationProgram, avd->application);
+        freerdp_settings_set_bool(settings, FreeRDP_AadSecurity, avd->entra_desktop_sign_in);
+    }
+    session->config.avd = NULL;
     session->config.gateway_host = NULL;
     session->config.gateway_username = NULL;
     session->config.gateway_domain = NULL;

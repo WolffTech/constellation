@@ -110,6 +110,13 @@ if [[ ! -f "$openssl_archive" ]]; then
 fi
 mkdir -p "$TREE/Dependencies/Native"
 /bin/cp -p "$openssl_archive" "$TREE/Dependencies/Native/$(basename "$openssl_archive")"
+cjson_version="$(sed -n 's/^CJSON_VERSION="\([^"]*\)"/\1/p' "$ROOT/Scripts/build-cjson.sh")"
+cjson_archive="$ROOT/.tools/cjson-$cjson_version.tar.gz"
+if [[ ! -f "$cjson_archive" ]]; then
+  echo "$cjson_archive is missing; run Scripts/build-cjson.sh first" >&2
+  exit 1
+fi
+/bin/cp -p "$cjson_archive" "$TREE/Dependencies/Native/$(basename "$cjson_archive")"
 
 zig_cache="${ZIG_GLOBAL_CACHE_DIR:-$HOME/.cache/zig}"
 zig_archives=("$zig_cache"/p/*.tar.gz)

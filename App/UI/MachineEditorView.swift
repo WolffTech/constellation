@@ -4,6 +4,7 @@
 import AppKit
 import ConstellationCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Adds or edits a machine. A new machine starts as a five-field form that
 /// creates one address and one profile; "More Options" and Edit Machine open
@@ -103,7 +104,9 @@ struct MachineEditorView: View {
             } else if let index = draft.vncProfiles.firstIndex(where: { $0.id == id }) {
                 VNCProfileForm(draft: $draft.vncProfiles[index], addresses: draft.addresses, isDefault: isDefault, onMakeDefault: makeDefault)
             } else if let index = draft.rdpProfiles.firstIndex(where: { $0.id == id }) {
-                RDPProfileForm(draft: $draft.rdpProfiles[index], addresses: draft.addresses, isDefault: isDefault, onMakeDefault: makeDefault)
+                RDPProfileForm(
+                    draft: $draft.rdpProfiles[index], addresses: draft.addresses, isDefault: isDefault, onMakeDefault: makeDefault,
+                    onImportAzureVirtualDesktop: { draft.applyAzureVirtualDesktop($0, to: id) })
             }
         }
     }
@@ -518,6 +521,10 @@ private struct RDPProfileForm: View {
     let addresses: [MachineAddress]
     let isDefault: Bool
     let onMakeDefault: () -> Void
+    /// The file also gives the machine an address, so the editor applies it.
+    let onImportAzureVirtualDesktop: (AVDConnectionFile) -> Void
+    @State private var importError: String?
+    @State private var isBrowsingWorkspace = false
 
     var body: some View {
         Form {
@@ -539,32 +546,101 @@ private struct RDPProfileForm: View {
             } footer: {
                 Text("Connects with Network Level Authentication over TLS. The server's certificate is shown for approval on first use.")
             }
-            Section {
-                Toggle("Connect through an RD Gateway", isOn: $draft.gateway.isEnabled)
-                if draft.gateway.isEnabled {
-                    TextField("Gateway", text: $draft.gateway.host, prompt: Text("gateway.example.com"))
-                    TextField("Gateway port", value: $draft.gateway.port, format: .number.grouping(.never), prompt: Text("443"))
-                    Toggle("Sign in to the gateway with the account above", isOn: $draft.gateway.usesDesktopAccount)
-                    if !draft.gateway.usesDesktopAccount {
-                        TextField("Gateway username", text: $draft.gateway.username, prompt: Text("Asked when connecting if empty"))
-                        TextField("Gateway domain", text: $draft.gateway.domain, prompt: Text("Optional"))
-                        SecretRow(
-                            title: "Gateway password",
-                            prompt: "Optional; asked when connecting if empty",
-                            hasStoredSecret: draft.gateway.hasStoredSecret,
-                            enteredSecret: $draft.gateway.enteredSecret,
-                            onRemoveStored: { draft.gateway.removeStoredSecret() })
+            if let resource = draft.gateway.azureVirtualDesktop {
+                Section {
+                    LabeledContent("Gateway", value: "\(draft.gateway.host):\(draft.gateway.port)")
+                    if let tenant = resource.tenantID { LabeledContent("Tenant", value: tenant) }
+                    LabeledContent("Desktop sign-in", value: resource.usesEntraDesktopSignIn ? "Microsoft Entra ID" : "Username and password")
+                    azureVirtualDesktopSources
+                    Button("Remove Azure Virtual Desktop", role: .destructive) {
+                        draft.gateway = RDPGatewayDraft()
+                    }
+                } header: {
+                    Text("Azure Virtual Desktop")
+                } footer: {
+                    Text("You sign in to Microsoft Entra ID in a browser window when connecting. A username in the form name@example.com picks that account on the sign-in page.")
+                }
+            } else {
+                Section {
+                    Toggle("Connect through an RD Gateway", isOn: $draft.gateway.isEnabled)
+                    if draft.gateway.isEnabled {
+                        TextField("Gateway", text: $draft.gateway.host, prompt: Text("gateway.example.com"))
+                        TextField("Gateway port", value: $draft.gateway.port, format: .number.grouping(.never), prompt: Text("443"))
+                        Toggle("Sign in to the gateway with the account above", isOn: $draft.gateway.usesDesktopAccount)
+                        if !draft.gateway.usesDesktopAccount {
+                            TextField("Gateway username", text: $draft.gateway.username, prompt: Text("Asked when connecting if empty"))
+                            TextField("Gateway domain", text: $draft.gateway.domain, prompt: Text("Optional"))
+                            SecretRow(
+                                title: "Gateway password",
+                                prompt: "Optional; asked when connecting if empty",
+                                hasStoredSecret: draft.gateway.hasStoredSecret,
+                                enteredSecret: $draft.gateway.enteredSecret,
+                                onRemoveStored: { draft.gateway.removeStoredSecret() })
+                        }
+                    }
+                } header: {
+                    Text("Gateway")
+                } footer: {
+                    if draft.gateway.isEnabled {
+                        Text("The session is tunnelled over HTTPS to the gateway, which connects to this machine's address on its own network. The address does not need to be reachable from this Mac.")
                     }
                 }
-            } header: {
-                Text("Gateway")
-            } footer: {
-                if draft.gateway.isEnabled {
-                    Text("The session is tunnelled over HTTPS to the gateway, which connects to this machine's address on its own network. The address does not need to be reachable from this Mac.")
+                Section {
+                    azureVirtualDesktopSources
+                } header: {
+                    Text("Azure Virtual Desktop")
+                } footer: {
+                    Text("Sign in with your work account to pick one of your desktops, the way the Windows App does with a workspace address. A connection file downloaded from the Azure Virtual Desktop web client works too.")
                 }
             }
         }
         .formStyle(.grouped)
+        .alert("Azure Virtual Desktop could not be set up", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
+            Button("OK") { importError = nil }
+        } message: {
+            Text(importError ?? "")
+        }
+    }
+
+    @ViewBuilder private var azureVirtualDesktopSources: some View {
+        HStack {
+            Button("Sign In and Choose a Desktop…", action: browseWorkspace)
+                .disabled(isBrowsingWorkspace)
+            if isBrowsingWorkspace { ProgressView().controlSize(.small) }
+        }
+        Button("Import Connection File…", action: importAzureVirtualDesktop)
+    }
+
+    private func browseWorkspace() {
+        isBrowsingWorkspace = true
+        let hint = draft.profile.username.flatMap { $0.contains("@") ? $0 : nil }
+        Task {
+            defer { isBrowsingWorkspace = false }
+            do {
+                let client = AVDFeedClient()
+                let desktops = try await client.desktops(loginHint: hint)
+                guard let desktop = AVDDesktopPicker.ask(desktops) else { return }
+                onImportAzureVirtualDesktop(try await client.connectionFile(for: desktop))
+            } catch AVDFeedClientError.signInCancelled {
+                // Closing the sign-in window is an answer, not an error.
+            } catch {
+                importError = error.localizedDescription
+            }
+        }
+    }
+
+    private func importAzureVirtualDesktop() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = ["rdp", "rdpw"].compactMap { UTType(filenameExtension: $0) }
+        panel.message = "Choose an Azure Virtual Desktop connection file"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            onImportAzureVirtualDesktop(try AVDConnectionFile(data: Data(contentsOf: url)))
+        } catch {
+            importError = error.localizedDescription
+        }
     }
 
     private var username: Binding<String> {
@@ -609,5 +685,27 @@ private struct SecretRow: View {
                 }
             }
         }
+    }
+}
+
+/// Native dialog for choosing among the desktops a workspace offers.
+@MainActor
+enum AVDDesktopPicker {
+    static func ask(_ desktops: [AVDFeed.Desktop]) -> AVDFeed.Desktop? {
+        let alert = NSAlert()
+        alert.messageText = "Choose a desktop"
+        alert.informativeText = "These are the Azure Virtual Desktop desktops assigned to the account you signed in with."
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 26))
+        popup.setAccessibilityLabel("Desktop")
+        // Titles may repeat across tenants, and a pop-up drops duplicate titles.
+        for desktop in desktops {
+            let item = NSMenuItem(title: [desktop.title, desktop.tenantName].compactMap(\.self).joined(separator: " — "), action: nil, keyEquivalent: "")
+            popup.menu?.addItem(item)
+        }
+        alert.accessoryView = popup
+        alert.addButton(withTitle: "Choose")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn, desktops.indices.contains(popup.indexOfSelectedItem) else { return nil }
+        return desktops[popup.indexOfSelectedItem]
     }
 }

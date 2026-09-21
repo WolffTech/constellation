@@ -24,6 +24,9 @@ public final class RDPSession: RemoteDesktopSession {
     private let passwordProvider: RDPPasswordProvider
     private let gatewayPasswordProvider: RDPPasswordProvider?
     private let verifier: RDPCertificateVerifier
+    private let entraSignIn: RDPEntraSignIn?
+    /// The sign-in page being shown; cancelled on disconnect so it closes.
+    private var signInTask: Task<String?, Never>?
     private let host: RDPHostView
     private let surface = RDPSurfaceView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
     private var handle: OpaquePointer?
@@ -59,12 +62,14 @@ public final class RDPSession: RemoteDesktopSession {
         configuration: RDPSessionConfiguration,
         password: @escaping RDPPasswordProvider,
         gatewayPassword: RDPPasswordProvider? = nil,
-        verifyCertificate: @escaping RDPCertificateVerifier
+        verifyCertificate: @escaping RDPCertificateVerifier,
+        entraSignIn: RDPEntraSignIn? = nil
     ) {
         self.configuration = configuration
         self.passwordProvider = password
         self.gatewayPasswordProvider = gatewayPassword
         self.verifier = verifyCertificate
+        self.entraSignIn = entraSignIn
         clipboard = configuration.sharesClipboard ? RDPClipboardSync() : nil
         host = RDPHostView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
         view = host
@@ -96,6 +101,7 @@ public final class RDPSession: RemoteDesktopSession {
     public func disconnect() {
         connectTask?.cancel()
         connectTask = nil
+        signInTask?.cancel()
         guard let handle, state.isLive else { return }
         transition(to: .disconnecting)
         crdp_session_disconnect(handle)
@@ -137,7 +143,8 @@ public final class RDPSession: RemoteDesktopSession {
             frame_updated: rdpFrameUpdated,
             verify_certificate: rdpVerifyCertificate,
             clipboard_text: rdpClipboardText,
-            cursor_changed: rdpCursorChanged)
+            cursor_changed: rdpCursorChanged,
+            entra_sign_in: rdpEntraSignIn)
 
         let gateway = configuration.gateway
         var gatewayUsername: String?
@@ -147,14 +154,30 @@ public final class RDPSession: RemoteDesktopSession {
             gatewayDomain = domain
         }
         let usesDesktopAccount = gateway?.account == .sameAsDesktop
+        var resource: RDPAzureVirtualDesktopResource?
+        if case .azureVirtualDesktop(let avd) = gateway?.account { resource = avd }
 
         // The passwords are copied into FreeRDP's settings and this stack frame
         // is the only other place they live.
         let strings = [
             configuration.host, configuration.username, configuration.domain, password,
             gateway?.host, gatewayUsername, gatewayDomain, gatewayPassword,
+            resource?.endpointPool, resource?.geo, resource?.armPath, resource?.tenantID,
+            resource?.diagnosticServiceURL, resource?.hubDiscoveryURL, resource?.activityHint,
+            resource?.loadBalanceInfo, resource?.application,
         ]
         withOptionalCStrings(strings) { ptrs in
+            var avd = crdp_avd(
+                endpoint_pool: ptrs[8],
+                geo: ptrs[9],
+                arm_path: ptrs[10],
+                tenant_id: ptrs[11],
+                diagnostic_service_url: ptrs[12],
+                hub_discovery_url: ptrs[13],
+                activity_hint: ptrs[14],
+                load_balance_info: ptrs[15],
+                application: ptrs[16],
+                entra_desktop_sign_in: resource?.usesEntraDesktopSignIn ?? false)
             let initial = pixelSize(for: CGSize(width: max(1, configuration.width), height: max(1, configuration.height)))
             var config = crdp_config(
                 host: ptrs[0],
@@ -173,9 +196,13 @@ public final class RDPSession: RemoteDesktopSession {
                 gateway_use_same_credentials: usesDesktopAccount,
                 gateway_username: ptrs[5],
                 gateway_domain: ptrs[6],
-                gateway_password: ptrs[7])
+                gateway_password: ptrs[7],
+                avd: nil)
             var callbacksCopy = callbacks
-            handle = crdp_session_create(&config, &callbacksCopy)
+            withUnsafePointer(to: &avd) { avdPointer in
+                if resource != nil { config.avd = avdPointer }
+                handle = crdp_session_create(&config, &callbacksCopy)
+            }
         }
 
         guard handle != nil else {
@@ -225,6 +252,19 @@ public final class RDPSession: RemoteDesktopSession {
 
     fileprivate func verifyCertificate(_ certificate: RDPCertificate) async -> RDPCertificateVerdict {
         await verifier(certificate)
+    }
+
+    /// Shows the sign-in page FreeRDP asks for. A UPN on the profile picks
+    /// the account, which matters when several tenants are signed in.
+    fileprivate func signIn(authorizeURL: String) async -> String? {
+        let hint = configuration.username.flatMap { $0.contains("@") ? $0 : nil }
+        guard let entraSignIn, state.isLive,
+              let request = RDPEntraSignInRequest(authorizeURL: authorizeURL, loginHint: hint)
+        else { return nil }
+        let task = Task { await entraSignIn(request) }
+        signInTask = task
+        defer { signInTask = nil }
+        return await task.value
     }
 
     fileprivate func clipboardTextReceived(_ text: String) {
@@ -322,6 +362,7 @@ public final class RDPSession: RemoteDesktopSession {
     static let tlsFailureMessage = "The secure connection could not be established."
     static let connectFailureMessage = "The connection to the server did not complete."
     static let gatewayFailureMessage = "The gateway refused the connection. Your account may not be allowed to use this gateway or reach this computer through it."
+    static let signInFailureMessage = "Microsoft Entra ID did not issue a token for this sign-in. The account may not have access to this desktop, or a Conditional Access policy may require a managed device."
     static let genericFailureMessage = "The connection ended unexpectedly."
 
     /// Maps the bridge's failure class. Clean closes and user cancellations
@@ -340,6 +381,8 @@ public final class RDPSession: RemoteDesktopSession {
             return RemoteDesktopSessionFailure(message: connectFailureMessage)
         case CRDP_FAILURE_GATEWAY:
             return RemoteDesktopSessionFailure(message: gatewayFailureMessage)
+        case CRDP_FAILURE_SIGN_IN:
+            return RemoteDesktopSessionFailure(message: signInFailureMessage, isAuthenticationFailure: true)
         default:
             return RemoteDesktopSessionFailure(message: genericFailureMessage)
         }
@@ -474,6 +517,25 @@ private func rdpVerifyCertificate(_ context: UnsafeMutableRawPointer?, _ certifi
     case .acceptOnce: return CRDP_CERT_ACCEPT_ONCE
     case .reject: return CRDP_CERT_REJECT
     }
+}
+
+/// Blocks the client thread while the user signs in. The code is handed to the
+/// bridge as a malloc'd string, which it frees.
+private func rdpEntraSignIn(_ context: UnsafeMutableRawPointer?, _ authorizeURL: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
+    guard let callbackContext = callbackContext(from: context), let authorizeURL else { return nil }
+    let url = String(cString: authorizeURL)
+    let codeBox = CodeBox()
+    let semaphore = DispatchSemaphore(value: 0)
+    Task { @MainActor in
+        codeBox.code = await callbackContext.session?.signIn(authorizeURL: url)
+        semaphore.signal()
+    }
+    semaphore.wait()
+    return codeBox.code.flatMap { strdup($0) }
+}
+
+private final class CodeBox: @unchecked Sendable {
+    var code: String?
 }
 
 private final class VerdictBox: @unchecked Sendable {

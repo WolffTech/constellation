@@ -3,16 +3,21 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 # Builds FreeRDP from the pinned Vendor/freerdp submodule as static arm64
-# libraries and wraps them (with OpenSSL) in FreeRDPKit.xcframework. Output:
+# libraries and wraps them (with OpenSSL and cJSON) in FreeRDPKit.xcframework.
+# Output:
 #   Vendor/build/freerdp/FreeRDPKit.xcframework  (library only)
 #   Vendor/build/freerdp/headers                 (freerdp/ and winpr/)
-# Needs CMake and the Xcode command line tools. `build-openssl.sh` downloads
-# and builds the pinned OpenSSL release. Rerun after bumping either dependency.
+# Needs CMake and the Xcode command line tools. `build-openssl.sh` and
+# `build-cjson.sh` download and build the pinned OpenSSL and cJSON releases.
+# Rerun after bumping any of them.
 # LTO is off because xcodebuild cannot wrap bitcode archives in an xcframework.
 # WITH_INTERNAL_MD4/MD5/RC4 compile WinPR's own hash/cipher code so NTLM (NLA)
 # never needs OpenSSL 3's legacy provider, which is a separate dylib that a
 # hardened-runtime app cannot dlopen — without this, NLA fails after the TLS
 # handshake with ERRCONNECT_CONNECT_TRANSPORT_FAILED.
+# WITH_AAD compiles Entra ID sign-in and the Azure Virtual Desktop (ARM)
+# gateway transport. Both parse JSON through WinPR, so cJSON is required, and
+# cJSON_DIR pins detection to the pinned build instead of a Homebrew copy.
 #
 # The default client channel set is built: rdpdr is required during connection
 # setup and it in turn registers rdpsnd, so rdpsnd stays in with only its
@@ -37,10 +42,12 @@ if [[ ! -f "$SRC/CMakeLists.txt" ]]; then
 fi
 command -v cmake >/dev/null || { echo "cmake not found (brew install cmake)" >&2; exit 1; }
 "$ROOT/Scripts/build-openssl.sh"
+"$ROOT/Scripts/build-cjson.sh"
 OPENSSL="$ROOT/Vendor/build/openssl"
+CJSON="$ROOT/Vendor/build/cjson"
 
 echo "Using $(cmake --version | head -1), $(clang --version | head -1)"
-echo "Building FreeRDP ($BUILD_TYPE) from $(git -C "$SRC" rev-parse --short HEAD) with OpenSSL at $OPENSSL"
+echo "Building FreeRDP ($BUILD_TYPE) from $(git -C "$SRC" rev-parse --short HEAD) with OpenSSL at $OPENSSL and cJSON at $CJSON"
 
 rm -rf "$BUILD" "$PREFIX"
 cmake -S "$SRC" -B "$BUILD" \
@@ -74,7 +81,9 @@ cmake -S "$SRC" -B "$BUILD" \
   -DWITH_OPUS=OFF \
   -DWITH_PKCS11=OFF \
   -DWITH_KRB5=OFF \
-  -DWITH_JSON_DISABLED=ON \
+  -DWITH_CJSON_REQUIRED=ON \
+  -DcJSON_DIR="$CJSON/lib/cmake/cJSON" \
+  -DWITH_AAD=ON \
   -DWITH_SMARTCARD_EMULATE=OFF \
   -DWITH_X11=OFF \
   -DCHANNEL_AUDIN=OFF \
@@ -94,7 +103,7 @@ cmake --build "$BUILD" --parallel "$JOBS"
 cmake --install "$BUILD" >/dev/null
 
 # One archive keeps SwiftPM's binary target simple: FreeRDP, WinPR and the
-# OpenSSL it was built against.
+# OpenSSL and cJSON they were built against.
 merged="$PREFIX/lib/libFreeRDPKit.a"
 # Channel "-common" helper archives are not installed, so gather every archive
 # from the build tree (skipping cmake's LTO probe).
@@ -103,7 +112,8 @@ while IFS= read -r archive; do archives+=("$archive"); done < <(find "$BUILD" -n
 libtool -static -no_warning_for_no_symbols -o "$merged" \
   "${archives[@]}" \
   "$OPENSSL/lib/libssl.a" \
-  "$OPENSSL/lib/libcrypto.a"
+  "$OPENSSL/lib/libcrypto.a" \
+  "$CJSON/lib/libcjson.a"
 
 # Headers are deliberately NOT packed into the xcframework: Xcode copies every
 # binary target's headers into one shared include directory, where GhosttyKit's
