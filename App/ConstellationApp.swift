@@ -18,6 +18,9 @@ struct ConstellationApp: App {
                 .onAppear { appDelegate.root = root }
         }
         .defaultSize(width: 1100, height: 700)
+        // Pinned because the automatic style can resolve to a compact toolbar here
+        // but not in session windows, which moves the tab bar. They copy this style.
+        .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { root.updates.checkForUpdates() }
