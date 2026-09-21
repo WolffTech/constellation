@@ -34,7 +34,7 @@ struct AVDFeedClientTests {
         let service = FakeService()
         service.responses = [
             tokenURL: (200, #"{"access_token":"tok123","token_type":"Bearer"}"#),
-            AVDFeed.discoveryURL.absoluteString: (200, #"<TenantFeedURLs><TenantFeedURL FeedURL="\#(feedURL)" TenantDisplayName="Contoso"/></TenantFeedURLs>"#),
+            AVDCloud.commercial.feedDiscoveryURL.absoluteString: (200, #"<TenantFeedURLs><TenantFeedURL FeedURL="\#(feedURL)" TenantDisplayName="Contoso"/></TenantFeedURLs>"#),
             feedURL: (200, """
                 <ResourceCollection><Publisher><Resources><Resource ID="desk1" Title="SessionDesktop" Type="Desktop">
                 <HostingTerminalServers><HostingTerminalServer><ResourceFile URL="\(fileURL)"/></HostingTerminalServer></HostingTerminalServers>
@@ -49,6 +49,7 @@ struct AVDFeedClientTests {
         let service = workingService()
         var signIn: RDPEntraSignInRequest?
         let client = AVDFeedClient(
+            cloud: .commercial,
             transport: { try service.respond(to: $0) },
             signInPrompt: { request, _ in
                 signIn = request
@@ -78,12 +79,41 @@ struct AVDFeedClientTests {
             #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok123")
             #expect(request.value(forHTTPHeaderField: "X-MS-User-Agent") == AVDFeedClient.userAgent)
         }
-        #expect(service.requests.map(\.url?.absoluteString) == [tokenURL, AVDFeed.discoveryURL.absoluteString, feedURL, fileURL])
+        #expect(service.requests.map(\.url?.absoluteString) == [tokenURL, AVDCloud.commercial.feedDiscoveryURL.absoluteString, feedURL, fileURL])
+    }
+
+    @Test func aGovernmentAccountSignsInAndReadsItsWorkspaceInItsOwnCloud() async throws {
+        let govTokenURL = "https://login.microsoftonline.us/organizations/oauth2/v2.0/token"
+        let govDiscoveryURL = "https://rdweb.wvd.azure.us/api/arm/feeddiscovery"
+        let service = FakeService()
+        service.responses = [
+            govTokenURL: (200, #"{"access_token":"tok123"}"#),
+            // A relative feed address resolves against the cloud's own service.
+            govDiscoveryURL: (200, #"<TenantFeedURLs><TenantFeedURL FeedURL="/api/arm/hubs/feed"/></TenantFeedURLs>"#),
+        ]
+        var signIn: RDPEntraSignInRequest?
+        let client = AVDFeedClient(
+            cloud: .usGovernment,
+            transport: { try service.respond(to: $0) },
+            signInPrompt: { request, _ in
+                signIn = request
+                return "code-1"
+            })
+
+        await #expect(throws: AVDFeedClientError.requestFailed(status: 404, detail: "")) { try await client.desktops(loginHint: nil) }
+
+        let authorizeURL = try #require(signIn).authorizeURL
+        let page = try #require(URLComponents(url: authorizeURL, resolvingAgainstBaseURL: false))
+        #expect(page.host == "login.microsoftonline.us")
+        #expect(page.queryItems?.first { $0.name == "scope" }?.value == "https://www.wvd.azure.us/.default openid profile")
+        // Entra ID's government cloud refuses the client a `nativeclient` redirect.
+        #expect(signIn?.redirectURI == "ms-appx-web://Microsoft.AAD.BrokerPlugin/a85cf173-4192-42f8-81fa-777a763e6e2c")
+        #expect(service.requests.map(\.url?.absoluteString) == [govTokenURL, govDiscoveryURL, "https://rdweb.wvd.azure.us/api/arm/hubs/feed"])
     }
 
     @Test func aClosedSignInWindowAsksTheServiceNothing() async {
         let service = workingService()
-        let client = AVDFeedClient(transport: { try service.respond(to: $0) }, signInPrompt: { _, _ in nil })
+        let client = AVDFeedClient(cloud: .commercial, transport: { try service.respond(to: $0) }, signInPrompt: { _, _ in nil })
         await #expect(throws: AVDFeedClientError.signInCancelled) { try await client.desktops(loginHint: nil) }
         #expect(service.requests.isEmpty)
     }
@@ -91,7 +121,7 @@ struct AVDFeedClientTests {
     @Test func reportsWhyEntraIDRefusedTheSignIn() async {
         let service = workingService()
         service.responses[tokenURL] = (400, #"{"error":"invalid_grant","error_description":"AADSTS53003: Access has been blocked by Conditional Access policies."}"#)
-        let client = AVDFeedClient(transport: { try service.respond(to: $0) }, signInPrompt: { _, _ in "code-1" })
+        let client = AVDFeedClient(cloud: .commercial, transport: { try service.respond(to: $0) }, signInPrompt: { _, _ in "code-1" })
         await #expect(throws: AVDFeedClientError.signInRefused("AADSTS53003: Access has been blocked by Conditional Access policies.")) {
             try await client.desktops(loginHint: nil)
         }
@@ -99,8 +129,8 @@ struct AVDFeedClientTests {
 
     @Test func reportsAFeedErrorWithTheServicesOwnWords() async {
         let service = workingService()
-        service.responses[AVDFeed.discoveryURL.absoluteString] = (400, "INCOMPATIBLE_CLIENT_VERSION")
-        let client = AVDFeedClient(transport: { try service.respond(to: $0) }, signInPrompt: { _, _ in "code-1" })
+        service.responses[AVDCloud.commercial.feedDiscoveryURL.absoluteString] = (400, "INCOMPATIBLE_CLIENT_VERSION")
+        let client = AVDFeedClient(cloud: .commercial, transport: { try service.respond(to: $0) }, signInPrompt: { _, _ in "code-1" })
         await #expect(throws: AVDFeedClientError.requestFailed(status: 400, detail: "INCOMPATIBLE_CLIENT_VERSION")) {
             try await client.desktops(loginHint: nil)
         }
@@ -109,7 +139,7 @@ struct AVDFeedClientTests {
     @Test func anAccountWithOnlyRemoteAppsHasNoDesktops() async {
         let service = workingService()
         service.responses[feedURL] = (200, "<ResourceCollection/>")
-        let client = AVDFeedClient(transport: { try service.respond(to: $0) }, signInPrompt: { _, _ in "code-1" })
+        let client = AVDFeedClient(cloud: .commercial, transport: { try service.respond(to: $0) }, signInPrompt: { _, _ in "code-1" })
         await #expect(throws: AVDFeedClientError.noDesktops) { try await client.desktops(loginHint: nil) }
     }
 }

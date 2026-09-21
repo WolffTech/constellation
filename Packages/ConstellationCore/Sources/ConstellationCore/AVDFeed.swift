@@ -8,8 +8,6 @@ import Foundation
 /// lists the account's resources with a link to their connection file. The
 /// feed is the Remote Desktop web feed (MS-TSWP); discovery is not documented.
 public enum AVDFeed {
-    /// The address users give the Windows App to subscribe to a workspace.
-    public static let discoveryURL = URL(string: "https://rdweb.wvd.microsoft.com/api/arm/feeddiscovery")!
     public static let discoveryContentType = "application/x-msts-radc-discovery+xml,text/xml"
     public static let feedContentType = "application/x-msts-radc+xml;radc_schema_version=2.0,text/xml"
 
@@ -27,10 +25,10 @@ public enum AVDFeed {
         public var connectionFileURL: URL
     }
 
-    public static func tenantFeeds(fromDiscovery data: Data) throws -> [TenantFeed] {
+    public static func tenantFeeds(fromDiscovery data: Data, in cloud: AVDCloud) throws -> [TenantFeed] {
         try elements(in: data).compactMap { element in
             guard element.name == "TenantFeedURL",
-                  let url = element.attributes["FeedURL"].flatMap({ URL(string: $0, relativeTo: discoveryURL) })
+                  let url = element.attributes["FeedURL"].flatMap({ URL(string: $0, relativeTo: cloud.feedDiscoveryURL) })
             else { return nil }
             return TenantFeed(url: url.absoluteURL, tenantName: element.attributes["TenantDisplayName"])
         }

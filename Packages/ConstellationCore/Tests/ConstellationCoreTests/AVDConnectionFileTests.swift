@@ -61,6 +61,11 @@ struct AVDConnectionFileTests {
         #expect(file.gateway.port == RDPGateway.defaultPort)
     }
 
+    @Test func theGatewaysNameTellsItsCloud() {
+        #expect(AVDCloud(gatewayHost: "afdfp-rdgateway-r1.wvd.microsoft.com") == .commercial)
+        #expect(AVDCloud(gatewayHost: "rdgateway-r0.WVD.azure.us") == .usGovernment)
+    }
+
     @Test func rejectsAnOrdinaryConnectionFile() {
         #expect(throws: AVDConnectionFileError.notAzureVirtualDesktop) {
             try AVDConnectionFile(contents: "full address:s:win.example.com\ngatewayhostname:s:gw.example.com\n")
