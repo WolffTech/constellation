@@ -1029,6 +1029,10 @@ crdp_session *crdp_session_create(const crdp_config *config, const crdp_callback
         if (avd->application)
             freerdp_settings_set_string(settings, FreeRDP_RemoteApplicationProgram, avd->application);
         freerdp_settings_set_bool(settings, FreeRDP_AadSecurity, avd->entra_desktop_sign_in);
+        if (avd->entra_host)
+            freerdp_settings_set_string(settings, FreeRDP_GatewayAzureActiveDirectory, avd->entra_host);
+        if (avd->gateway_scope)
+            freerdp_settings_set_string(settings, FreeRDP_GatewayAvdScope, avd->gateway_scope);
     }
     session->config.avd = NULL;
     session->config.gateway_host = NULL;

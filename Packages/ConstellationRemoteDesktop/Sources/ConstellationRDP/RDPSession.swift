@@ -165,6 +165,7 @@ public final class RDPSession: RemoteDesktopSession {
             resource?.endpointPool, resource?.geo, resource?.armPath, resource?.tenantID,
             resource?.diagnosticServiceURL, resource?.hubDiscoveryURL, resource?.activityHint,
             resource?.loadBalanceInfo, resource?.application,
+            resource?.cloud.entraHost, resource?.cloud.gatewayScope,
         ]
         withOptionalCStrings(strings) { ptrs in
             var avd = crdp_avd(
@@ -177,7 +178,9 @@ public final class RDPSession: RemoteDesktopSession {
                 activity_hint: ptrs[14],
                 load_balance_info: ptrs[15],
                 application: ptrs[16],
-                entra_desktop_sign_in: resource?.usesEntraDesktopSignIn ?? false)
+                entra_desktop_sign_in: resource?.usesEntraDesktopSignIn ?? false,
+                entra_host: ptrs[17],
+                gateway_scope: ptrs[18])
             let initial = pixelSize(for: CGSize(width: max(1, configuration.width), height: max(1, configuration.height)))
             var config = crdp_config(
                 host: ptrs[0],

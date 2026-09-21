@@ -73,6 +73,10 @@ typedef struct {
     const char *application;
     /// The desktop also signs in with Entra ID rather than a password.
     bool entra_desktop_sign_in;
+    /// The Entra ID host and the percent-encoded gateway scope of the
+    /// resource's Azure cloud. NULL keeps FreeRDP's defaults, the commercial cloud.
+    const char *entra_host;
+    const char *gateway_scope;
 } crdp_avd;
 
 typedef struct {

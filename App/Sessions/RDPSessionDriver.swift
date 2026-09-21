@@ -122,7 +122,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         case .sameAsDesktop:
             return (.sameAsDesktop, nil)
         case .azureVirtualDesktop(let resource):
-            return (.azureVirtualDesktop(RDPAzureVirtualDesktopResource(resource)), nil)
+            return (.azureVirtualDesktop(RDPAzureVirtualDesktopResource(resource, in: AVDCloud(gatewayHost: gateway.host))), nil)
         case .separate(let username, let domain, let id):
             (savedUsername, savedDomain, credentialID) = (username, domain, id)
         }
@@ -146,7 +146,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
 }
 
 private extension RDPAzureVirtualDesktopResource {
-    init(_ resource: AVDResource) {
+    init(_ resource: AVDResource, in cloud: AVDCloud) {
         self.init(
             endpointPool: resource.endpointPool,
             geo: resource.geo,
@@ -157,7 +157,8 @@ private extension RDPAzureVirtualDesktopResource {
             activityHint: resource.activityHint,
             loadBalanceInfo: resource.loadBalanceInfo,
             application: resource.application,
-            usesEntraDesktopSignIn: resource.usesEntraDesktopSignIn)
+            usesEntraDesktopSignIn: resource.usesEntraDesktopSignIn,
+            cloud: cloud == .usGovernment ? .usGovernment : .commercial)
     }
 }
 
