@@ -18,8 +18,7 @@ public struct AVDResource: Hashable, Sendable, Codable {
     public var loadBalanceInfo: String?
     /// The resource's id in its workspace, which the gateway wants for desktops too.
     public var application: String?
-    /// The desktop also signs in with Entra ID, so it needs no password.
-    public var usesEntraDesktopSignIn: Bool
+    public var desktopSignIn: AVDDesktopSignIn
 
     public init(
         endpointPool: String? = nil,
@@ -31,7 +30,7 @@ public struct AVDResource: Hashable, Sendable, Codable {
         activityHint: String? = nil,
         loadBalanceInfo: String? = nil,
         application: String? = nil,
-        usesEntraDesktopSignIn: Bool = false
+        desktopSignIn: AVDDesktopSignIn = .password
     ) {
         self.endpointPool = endpointPool
         self.geo = geo
@@ -42,8 +41,45 @@ public struct AVDResource: Hashable, Sendable, Codable {
         self.activityHint = activityHint
         self.loadBalanceInfo = loadBalanceInfo
         self.application = application
-        self.usesEntraDesktopSignIn = usesEntraDesktopSignIn
+        self.desktopSignIn = desktopSignIn
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case endpointPool, geo, armPath, tenantID, diagnosticServiceURL, hubDiscoveryURL
+        case activityHint, loadBalanceInfo, application, desktopSignIn
+    }
+
+    private enum LegacyCodingKeys: String, CodingKey {
+        case usesEntraDesktopSignIn
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        endpointPool = try container.decodeIfPresent(String.self, forKey: .endpointPool)
+        geo = try container.decodeIfPresent(String.self, forKey: .geo)
+        armPath = try container.decodeIfPresent(String.self, forKey: .armPath)
+        tenantID = try container.decodeIfPresent(String.self, forKey: .tenantID)
+        diagnosticServiceURL = try container.decodeIfPresent(String.self, forKey: .diagnosticServiceURL)
+        hubDiscoveryURL = try container.decodeIfPresent(String.self, forKey: .hubDiscoveryURL)
+        activityHint = try container.decodeIfPresent(String.self, forKey: .activityHint)
+        loadBalanceInfo = try container.decodeIfPresent(String.self, forKey: .loadBalanceInfo)
+        application = try container.decodeIfPresent(String.self, forKey: .application)
+        if let signIn = try container.decodeIfPresent(AVDDesktopSignIn.self, forKey: .desktopSignIn) {
+            desktopSignIn = signIn
+        } else {
+            // Libraries saved before the sign-in could be chosen hold a flag.
+            let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+            desktopSignIn = try legacy.decodeIfPresent(Bool.self, forKey: .usesEntraDesktopSignIn) == true ? .entraID : .password
+        }
+    }
+}
+
+/// How the desktop behind the gateway signs its user in.
+public enum AVDDesktopSignIn: String, Hashable, Sendable, Codable {
+    /// The connection file promises nothing but a username and password.
+    case password
+    /// Entra ID, as the connection file promises, so no password is needed.
+    case entraID
 }
 
 public enum AVDConnectionFileError: Error, Hashable, Sendable, LocalizedError {
@@ -114,7 +150,7 @@ public struct AVDConnectionFile: Hashable, Sendable {
             activityHint: settings["activityhint"],
             loadBalanceInfo: settings["loadbalanceinfo"],
             application: settings["remoteapplicationprogram"],
-            usesEntraDesktopSignIn: settings["enablerdsaadauth"] == "1")))
+            desktopSignIn: settings["enablerdsaadauth"] == "1" ? .entraID : .password)))
     }
 }
 

@@ -190,7 +190,7 @@ public final class RDPSession: RemoteDesktopSession {
                 activity_hint: ptrs[14],
                 load_balance_info: ptrs[15],
                 application: ptrs[16],
-                entra_desktop_sign_in: account == nil && resource?.usesEntraDesktopSignIn == true,
+                entra_desktop_sign_in: account == nil && resource?.desktopSignIn == .entraID,
                 entra_host: ptrs[17],
                 gateway_scope: ptrs[18])
             let initial = pixelSize(for: CGSize(width: max(1, configuration.width), height: max(1, configuration.height)))

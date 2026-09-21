@@ -552,7 +552,7 @@ private struct RDPProfileForm: View {
                     LabeledContent("Gateway", value: "\(draft.gateway.host):\(draft.gateway.port)")
                     LabeledContent("Cloud", value: AVDCloud(gatewayHost: draft.gateway.host).name)
                     if let tenant = resource.tenantID { LabeledContent("Tenant", value: tenant) }
-                    LabeledContent("Desktop sign-in", value: resource.usesEntraDesktopSignIn ? "Microsoft Entra ID" : "Username and password")
+                    LabeledContent("Desktop sign-in", value: resource.desktopSignIn == .entraID ? "Microsoft Entra ID" : "Username and password")
                     azureVirtualDesktopSources
                     Button("Remove Azure Virtual Desktop", role: .destructive) {
                         draft.gateway = RDPGatewayDraft()

@@ -44,7 +44,7 @@ struct AVDConnectionFileTests {
             activityHint: #"ms-wvd-ep:16e1fb18?ScaleUnitPath={"Geo"%3a"EU"}"#,
             loadBalanceInfo: "mth://localhost/b47b47c1/16e1fb18",
             application: "||40d51148-8d2c-4222-aeb3-7ad10be11650",
-            usesEntraDesktopSignIn: false))
+            desktopSignIn: .password))
     }
 
     @Test func readsAFileWindowsSavedAsUTF16() throws {
@@ -52,7 +52,12 @@ struct AVDConnectionFileTests {
             .replacingOccurrences(of: "enablerdsaadauth:i:0", with: "enablerdsaadauth:i:1")
         let file = try AVDConnectionFile(data: Data([0xFF, 0xFE]) + windows.data(using: .utf16LittleEndian)!)
         #expect(file == (try AVDConnectionFile(contents: windows)))
-        #expect(file.gateway.azureVirtualDesktop?.usesEntraDesktopSignIn == true)
+        #expect(file.gateway.azureVirtualDesktop?.desktopSignIn == .entraID)
+    }
+
+    @Test func aResourceSavedWithTheOldEntraFlagStillSignsInWithEntraID() throws {
+        let saved = Data(#"{"tenantID":"tenant","usesEntraDesktopSignIn":true}"#.utf8)
+        #expect(try JSONDecoder().decode(AVDResource.self, from: saved) == AVDResource(tenantID: "tenant", desktopSignIn: .entraID))
     }
 
     @Test func aGatewayWithoutAPortUsesTheDefault() throws {

@@ -139,7 +139,7 @@ struct RemoteDesktopSettingsTests {
             },
             certificatePrompt: { _, _, _ in .reject },
             entraSignInPrompt: { _, _ in nil })
-        let resource = AVDResource(armPath: "/subscriptions/s/hostpools/p", tenantID: "tenant", usesEntraDesktopSignIn: true)
+        let resource = AVDResource(armPath: "/subscriptions/s/hostpools/p", tenantID: "tenant", desktopSignIn: .entraID)
         let gateway = RDPGateway(host: "rdgateway.wvd.microsoft.com", credentials: .azureVirtualDesktop(resource))
 
         let session = try #require(driver.start(RDPSessionRequest(
@@ -150,7 +150,7 @@ struct RemoteDesktopSettingsTests {
         #expect(session.configuration.gateway == RDPGatewayConfiguration(
             host: "rdgateway.wvd.microsoft.com", port: 443,
             account: .azureVirtualDesktop(RDPAzureVirtualDesktopResource(
-                armPath: "/subscriptions/s/hostpools/p", tenantID: "tenant", usesEntraDesktopSignIn: true))))
+                armPath: "/subscriptions/s/hostpools/p", tenantID: "tenant", desktopSignIn: .entraID))))
     }
 
     @Test func rdpDriverSignsInToTheGovernmentCloudForAGovernmentGateway() throws {
@@ -160,14 +160,14 @@ struct RemoteDesktopSettingsTests {
             credentialPrompt: { _ in nil },
             certificatePrompt: { _, _, _ in .reject },
             entraSignInPrompt: { _, _ in nil })
-        let gateway = RDPGateway(host: "rdgateway.wvd.azure.us", credentials: .azureVirtualDesktop(AVDResource(usesEntraDesktopSignIn: true)))
+        let gateway = RDPGateway(host: "rdgateway.wvd.azure.us", credentials: .azureVirtualDesktop(AVDResource(desktopSignIn: .entraID)))
 
         let session = try #require(driver.start(RDPSessionRequest(
             host: "rdgateway.wvd.azure.us", port: 3389, username: nil, domain: nil, credentialID: nil,
             sharesClipboard: false, gateway: gateway, machineName: "Cloud PC")) as? RDPSession)
 
         #expect(session.configuration.gateway?.account == .azureVirtualDesktop(
-            RDPAzureVirtualDesktopResource(usesEntraDesktopSignIn: true, cloud: .usGovernment)))
+            RDPAzureVirtualDesktopResource(desktopSignIn: .entraID, cloud: .usGovernment)))
     }
 
     @Test func rdpDriverStillAsksForTheDesktopPasswordBehindAzureVirtualDesktop() throws {
