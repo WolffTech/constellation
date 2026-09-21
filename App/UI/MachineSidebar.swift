@@ -78,6 +78,9 @@ struct MachineSidebar: View {
     @State private var groupPrompt: GroupPrompt?
     @State private var groupPromptName = ""
     @State private var dragSession = SidebarDragSession()
+    /// A list that loads with a profile row already selected leaves the outline view
+    /// with an orphaned row and a mis-indented one; every new session tab loads that way.
+    @State private var listLoaded = false
 
     var body: some View {
         List(selection: selection) {
@@ -102,6 +105,8 @@ struct MachineSidebar: View {
             }
         }
         .background(SidebarTableDropFeedback())
+        // After the first render, once the outline view has expanded its machines.
+        .task { listLoaded = true }
         .animation(.default, value: rows)
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search machines")
         .navigationTitle("Machines")
@@ -157,6 +162,7 @@ struct MachineSidebar: View {
     private var selection: Binding<SidebarItem?> {
         Binding(
             get: {
+                guard listLoaded else { return nil }
                 switch ui.localSelection {
                 case .machine: return .localMachine
                 case .terminal: return .localTerminal
