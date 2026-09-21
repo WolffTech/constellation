@@ -101,6 +101,7 @@ struct crdp_session {
     // plain connect failure, so the client thread reads these instead.
     bool sign_in_cancelled;
     bool sign_in_failed;
+    bool entra_desktop_sign_in; // the desktop was offered an Entra ID sign-in only
     // Tracks the buffer the Swift side last saw, so a GFX ResetGraphics realloc
     // is reported as a resize rather than an update against a stale pointer.
     const uint8_t *last_gfx_buffer;
@@ -828,8 +829,11 @@ static DWORD WINAPI crdp_client_thread(LPVOID param) {
     pthread_setname_np("constellation.rdp.client"); // visible in samples and Instruments
 
     if (!freerdp_connect(instance)) {
-        crdp_failure failure = map_failure(freerdp_get_last_error(context));
-        if (session->sign_in_cancelled)
+        UINT32 error = freerdp_get_last_error(context);
+        crdp_failure failure = map_failure(error);
+        if (session->entra_desktop_sign_in && error == FREERDP_ERROR_SECURITY_NEGO_CONNECT_FAILED)
+            failure = CRDP_FAILURE_DESKTOP_SIGN_IN_REFUSED;
+        else if (session->sign_in_cancelled)
             failure = CRDP_FAILURE_CANCELLED;
         else if (session->sign_in_failed)
             failure = CRDP_FAILURE_SIGN_IN;
@@ -1029,6 +1033,20 @@ crdp_session *crdp_session_create(const crdp_config *config, const crdp_callback
         if (avd->application)
             freerdp_settings_set_string(settings, FreeRDP_RemoteApplicationProgram, avd->application);
         freerdp_settings_set_bool(settings, FreeRDP_AadSecurity, avd->entra_desktop_sign_in);
+        if (avd->entra_desktop_sign_in) {
+            // A desktop that refuses the sign-in must end the attempt. FreeRDP
+            // would retry with NLA through the same gateway connection, which
+            // the gateway brokers once and then answers with 403.
+            session->entra_desktop_sign_in = true;
+            freerdp_settings_set_bool(settings, FreeRDP_NlaSecurity, FALSE);
+            freerdp_settings_set_bool(settings, FreeRDP_ExtSecurity, FALSE);
+            freerdp_settings_set_bool(settings, FreeRDP_TlsSecurity, FALSE);
+            freerdp_settings_set_bool(settings, FreeRDP_RdpSecurity, FALSE);
+        }
+        if (avd->entra_host)
+            freerdp_settings_set_string(settings, FreeRDP_GatewayAzureActiveDirectory, avd->entra_host);
+        if (avd->gateway_scope)
+            freerdp_settings_set_string(settings, FreeRDP_GatewayAvdScope, avd->gateway_scope);
     }
     session->config.avd = NULL;
     session->config.gateway_host = NULL;

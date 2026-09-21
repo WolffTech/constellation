@@ -525,6 +525,7 @@ private struct RDPProfileForm: View {
     let onImportAzureVirtualDesktop: (AVDConnectionFile) -> Void
     @State private var importError: String?
     @State private var isBrowsingWorkspace = false
+    @State private var isChoosingCloud = false
 
     var body: some View {
         Form {
@@ -549,6 +550,7 @@ private struct RDPProfileForm: View {
             if let resource = draft.gateway.azureVirtualDesktop {
                 Section {
                     LabeledContent("Gateway", value: "\(draft.gateway.host):\(draft.gateway.port)")
+                    LabeledContent("Cloud", value: AVDCloud(gatewayHost: draft.gateway.host).name)
                     if let tenant = resource.tenantID { LabeledContent("Tenant", value: tenant) }
                     LabeledContent("Desktop sign-in", value: resource.usesEntraDesktopSignIn ? "Microsoft Entra ID" : "Username and password")
                     azureVirtualDesktopSources
@@ -604,20 +606,28 @@ private struct RDPProfileForm: View {
 
     @ViewBuilder private var azureVirtualDesktopSources: some View {
         HStack {
-            Button("Sign In and Choose a Desktop…", action: browseWorkspace)
+            Button("Sign In and Choose a Desktop…") { isChoosingCloud = true }
                 .disabled(isBrowsingWorkspace)
+                // An account exists in one cloud, and nothing tells which before it signs in.
+                .confirmationDialog("Which Azure cloud is your account in?", isPresented: $isChoosingCloud) {
+                    ForEach(AVDCloud.allCases, id: \.self) { cloud in
+                        Button(cloud.name) { browseWorkspace(in: cloud) }
+                    }
+                } message: {
+                    Text("Most organizations use Azure Commercial. US government agencies and their contractors may use Azure US Government.")
+                }
             if isBrowsingWorkspace { ProgressView().controlSize(.small) }
         }
         Button("Import Connection File…", action: importAzureVirtualDesktop)
     }
 
-    private func browseWorkspace() {
+    private func browseWorkspace(in cloud: AVDCloud) {
         isBrowsingWorkspace = true
         let hint = draft.profile.username.flatMap { $0.contains("@") ? $0 : nil }
         Task {
             defer { isBrowsingWorkspace = false }
             do {
-                let client = AVDFeedClient()
+                let client = AVDFeedClient(cloud: cloud)
                 let desktops = try await client.desktops(loginHint: hint)
                 guard let desktop = AVDDesktopPicker.ask(desktops) else { return }
                 onImportAzureVirtualDesktop(try await client.connectionFile(for: desktop))

@@ -92,6 +92,7 @@ public struct RDPAzureVirtualDesktopResource: Sendable, Equatable {
     public var application: String?
     /// The desktop also signs in with Entra ID, so no password is needed.
     public var usesEntraDesktopSignIn: Bool
+    public var cloud: RDPAzureCloud
 
     public init(
         endpointPool: String? = nil,
@@ -103,7 +104,8 @@ public struct RDPAzureVirtualDesktopResource: Sendable, Equatable {
         activityHint: String? = nil,
         loadBalanceInfo: String? = nil,
         application: String? = nil,
-        usesEntraDesktopSignIn: Bool = false
+        usesEntraDesktopSignIn: Bool = false,
+        cloud: RDPAzureCloud = .commercial
     ) {
         self.endpointPool = endpointPool
         self.geo = geo
@@ -115,6 +117,29 @@ public struct RDPAzureVirtualDesktopResource: Sendable, Equatable {
         self.loadBalanceInfo = loadBalanceInfo
         self.application = application
         self.usesEntraDesktopSignIn = usesEntraDesktopSignIn
+        self.cloud = cloud
+    }
+}
+
+/// The Azure cloud whose Entra ID signs the user in to a gateway.
+public enum RDPAzureCloud: Sendable, Equatable {
+    case commercial
+    case usGovernment
+
+    /// `nil` leaves FreeRDP's defaults, which are the commercial cloud's.
+    var entraHost: String? {
+        switch self {
+        case .commercial: nil
+        case .usGovernment: "login.microsoftonline.us"
+        }
+    }
+
+    /// Percent-encoded, as FreeRDP puts it in the authorize URL unchanged.
+    var gatewayScope: String? {
+        switch self {
+        case .commercial: nil
+        case .usGovernment: "https%3A%2F%2Fwww.wvd.azure.us%2F.default%20openid%20profile%20offline_access"
+        }
     }
 }
 
@@ -172,6 +197,23 @@ public enum RDPConnectionQuality: String, Sendable, Codable, CaseIterable {
     case broadband
     case modem
 }
+
+/// The account a desktop signs in with.
+public struct RDPDesktopCredentials: Sendable, Equatable {
+    public var username: String
+    public var domain: String?
+    public var password: String
+
+    public init(username: String, domain: String? = nil, password: String) {
+        self.username = username
+        self.domain = domain
+        self.password = password
+    }
+}
+
+/// Asked when a desktop refuses the Entra ID sign-in its connection file
+/// promised and wants an account instead. Returning `nil` gives up.
+public typealias RDPDesktopCredentialsProvider = @MainActor @Sendable () async -> RDPDesktopCredentials?
 
 /// Resolves the account password (from Keychain in the app). Returning `nil`
 /// aborts before connecting.

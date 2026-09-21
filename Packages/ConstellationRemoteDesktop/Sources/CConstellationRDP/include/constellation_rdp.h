@@ -36,6 +36,10 @@ typedef enum {
     CRDP_FAILURE_CONNECT,        // TCP connect / transport failed
     CRDP_FAILURE_GATEWAY,        // the RD Gateway refused or dropped the tunnel
     CRDP_FAILURE_SIGN_IN,        // Entra ID issued no token for the sign-in
+    /// The desktop takes a username and password, not the Entra ID sign-in its
+    /// connection file promised. Connecting again without
+    /// `entra_desktop_sign_in` works.
+    CRDP_FAILURE_DESKTOP_SIGN_IN_REFUSED,
 } crdp_failure;
 
 /// Certificate verdicts, matching FreeRDP's VerifyCertificateEx return values.
@@ -73,6 +77,10 @@ typedef struct {
     const char *application;
     /// The desktop also signs in with Entra ID rather than a password.
     bool entra_desktop_sign_in;
+    /// The Entra ID host and the percent-encoded gateway scope of the
+    /// resource's Azure cloud. NULL keeps FreeRDP's defaults, the commercial cloud.
+    const char *entra_host;
+    const char *gateway_scope;
 } crdp_avd;
 
 typedef struct {

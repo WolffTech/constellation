@@ -14,7 +14,7 @@ struct AVDFeedTests {
               <TenantFeedURL FeedURL="https://rdweb-g-eu-r1.wvd.microsoft.com/api/arm/hubs/feed?t=2" TenantId="8807" />
             </TenantFeedURLs>
             """
-        let feeds = try AVDFeed.tenantFeeds(fromDiscovery: Data(discovery.utf8))
+        let feeds = try AVDFeed.tenantFeeds(fromDiscovery: Data(discovery.utf8), in: .commercial)
         #expect(feeds == [
             AVDFeed.TenantFeed(url: URL(string: "https://rdweb-g-us-r0.wvd.microsoft.com/api/arm/hubs/feed?t=1")!, tenantName: "Contoso"),
             AVDFeed.TenantFeed(url: URL(string: "https://rdweb-g-eu-r1.wvd.microsoft.com/api/arm/hubs/feed?t=2")!, tenantName: nil),
@@ -64,7 +64,7 @@ struct AVDFeedTests {
 
     @Test func rejectsAFeedThatIsNotXML() {
         #expect(throws: AVDFeedError.unreadable) {
-            try AVDFeed.tenantFeeds(fromDiscovery: Data("INCOMPATIBLE_CLIENT_VERSION".utf8))
+            try AVDFeed.tenantFeeds(fromDiscovery: Data("INCOMPATIBLE_CLIENT_VERSION".utf8), in: .commercial)
         }
     }
 }

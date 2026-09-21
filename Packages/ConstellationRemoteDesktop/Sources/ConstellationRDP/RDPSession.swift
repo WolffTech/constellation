@@ -25,6 +25,10 @@ public final class RDPSession: RemoteDesktopSession {
     private let gatewayPasswordProvider: RDPPasswordProvider?
     private let verifier: RDPCertificateVerifier
     private let entraSignIn: RDPEntraSignIn?
+    private let desktopCredentialsProvider: RDPDesktopCredentialsProvider?
+    /// Set once the desktop has refused an Entra ID sign-in; connections
+    /// sign in with this account from then on.
+    private var desktopCredentials: RDPDesktopCredentials?
     /// The sign-in page being shown; cancelled on disconnect so it closes.
     private var signInTask: Task<String?, Never>?
     private let host: RDPHostView
@@ -63,13 +67,15 @@ public final class RDPSession: RemoteDesktopSession {
         password: @escaping RDPPasswordProvider,
         gatewayPassword: RDPPasswordProvider? = nil,
         verifyCertificate: @escaping RDPCertificateVerifier,
-        entraSignIn: RDPEntraSignIn? = nil
+        entraSignIn: RDPEntraSignIn? = nil,
+        desktopCredentials: RDPDesktopCredentialsProvider? = nil
     ) {
         self.configuration = configuration
         self.passwordProvider = password
         self.gatewayPasswordProvider = gatewayPassword
         self.verifier = verifyCertificate
         self.entraSignIn = entraSignIn
+        self.desktopCredentialsProvider = desktopCredentials
         clipboard = configuration.sharesClipboard ? RDPClipboardSync() : nil
         host = RDPHostView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
         view = host
@@ -159,12 +165,19 @@ public final class RDPSession: RemoteDesktopSession {
 
         // The passwords are copied into FreeRDP's settings and this stack frame
         // is the only other place they live.
+        let account = desktopCredentials
+        // FreeRDP signs an Azure Virtual Desktop account without a domain in
+        // to "AzureAD". A desktop that refused Entra ID is not joined to it,
+        // so an empty domain is sent to keep that default away.
+        let domain = account == nil ? configuration.domain : account?.domain ?? ""
         let strings = [
-            configuration.host, configuration.username, configuration.domain, password,
+            configuration.host, account?.username ?? configuration.username,
+            domain, account?.password ?? password,
             gateway?.host, gatewayUsername, gatewayDomain, gatewayPassword,
             resource?.endpointPool, resource?.geo, resource?.armPath, resource?.tenantID,
             resource?.diagnosticServiceURL, resource?.hubDiscoveryURL, resource?.activityHint,
             resource?.loadBalanceInfo, resource?.application,
+            resource?.cloud.entraHost, resource?.cloud.gatewayScope,
         ]
         withOptionalCStrings(strings) { ptrs in
             var avd = crdp_avd(
@@ -177,7 +190,9 @@ public final class RDPSession: RemoteDesktopSession {
                 activity_hint: ptrs[14],
                 load_balance_info: ptrs[15],
                 application: ptrs[16],
-                entra_desktop_sign_in: resource?.usesEntraDesktopSignIn ?? false)
+                entra_desktop_sign_in: account == nil && resource?.usesEntraDesktopSignIn == true,
+                entra_host: ptrs[17],
+                gateway_scope: ptrs[18])
             let initial = pixelSize(for: CGSize(width: max(1, configuration.width), height: max(1, configuration.height)))
             var config = crdp_config(
                 host: ptrs[0],
@@ -229,9 +244,34 @@ public final class RDPSession: RemoteDesktopSession {
             resizeTask?.cancel()
             clipboardTimer?.invalidate()
             clipboardTimer = nil
+            if failure == CRDP_FAILURE_DESKTOP_SIGN_IN_REFUSED, desktopCredentials == nil, let desktopCredentialsProvider {
+                retry(askingFor: desktopCredentialsProvider)
+                return
+            }
+            // A wrong account is asked for again rather than tried again.
+            if failure == CRDP_FAILURE_AUTHENTICATION { desktopCredentials = nil }
             transition(to: .disconnected(Self.failure(from: failure)))
         default:
             break
+        }
+    }
+
+    /// A connection file may promise an Entra ID sign-in the desktop does not
+    /// take; the Windows App finds out the same way and asks for an account.
+    /// The attempt starts over because the gateway brokers a connection once.
+    private func retry(askingFor provider: @escaping RDPDesktopCredentialsProvider) {
+        if let handle { crdp_session_free(handle) }
+        handle = nil
+        connectTask = Task { [weak self] in
+            let credentials = await provider()
+            guard let self else { return }
+            self.connectTask = nil
+            guard let credentials, !Task.isCancelled else {
+                self.transition(to: .disconnected(nil))
+                return
+            }
+            self.desktopCredentials = credentials
+            self.startSession(password: nil, gatewayPassword: nil)
         }
     }
 
@@ -363,6 +403,7 @@ public final class RDPSession: RemoteDesktopSession {
     static let connectFailureMessage = "The connection to the server did not complete."
     static let gatewayFailureMessage = "The gateway refused the connection. Your account may not be allowed to use this gateway or reach this computer through it."
     static let signInFailureMessage = "Microsoft Entra ID did not issue a token for this sign-in. The account may not have access to this desktop, or a Conditional Access policy may require a managed device."
+    static let desktopSignInRefusedMessage = "This desktop does not take a Microsoft Entra ID sign-in. It needs a username and password."
     static let genericFailureMessage = "The connection ended unexpectedly."
 
     /// Maps the bridge's failure class. Clean closes and user cancellations
@@ -383,6 +424,8 @@ public final class RDPSession: RemoteDesktopSession {
             return RemoteDesktopSessionFailure(message: gatewayFailureMessage)
         case CRDP_FAILURE_SIGN_IN:
             return RemoteDesktopSessionFailure(message: signInFailureMessage, isAuthenticationFailure: true)
+        case CRDP_FAILURE_DESKTOP_SIGN_IN_REFUSED:
+            return RemoteDesktopSessionFailure(message: desktopSignInRefusedMessage, isAuthenticationFailure: true)
         default:
             return RemoteDesktopSessionFailure(message: genericFailureMessage)
         }

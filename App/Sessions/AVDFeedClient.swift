@@ -33,21 +33,21 @@ final class AVDFeedClient {
     /// Microsoft's own Remote Desktop client registration, which FreeRDP also
     /// uses. The feed service names it in its authentication challenge.
     static let clientID = "a85cf173-4192-42f8-81fa-777a763e6e2c"
-    static let scope = "https://www.wvd.microsoft.com/.default openid profile"
-    static let redirectURI = "https://login.microsoftonline.com/common/oauth2/nativeclient"
-    static let authority = "https://login.microsoftonline.com/organizations/oauth2/v2.0"
     /// The feed service turns away clients it does not know with
     /// INCOMPATIBLE_CLIENT_VERSION, so this is the web client's identifier.
     static let userAgent = "com.microsoft.rdc.html/2.0.79.2 rdhtml-sdk/2.0.4"
 
+    private let cloud: AVDCloud
     private let transport: Transport
     private let signInPrompt: @MainActor @Sendable (RDPEntraSignInRequest, String) async -> String?
     private var accessToken: String?
 
     init(
+        cloud: AVDCloud,
         transport: @escaping Transport = { try await URLSession.shared.data(for: $0) },
         signInPrompt: @escaping @MainActor @Sendable (RDPEntraSignInRequest, String) async -> String? = RDPEntraSignInPrompter.ask
     ) {
+        self.cloud = cloud
         self.transport = transport
         self.signInPrompt = signInPrompt
     }
@@ -55,9 +55,9 @@ final class AVDFeedClient {
     /// Signs in, then lists the desktops in every tenant the account belongs to.
     func desktops(loginHint: String?) async throws -> [AVDFeed.Desktop] {
         let token = try await signIn(loginHint: loginHint)
-        let discovery = try await get(AVDFeed.discoveryURL, accept: AVDFeed.discoveryContentType, token: token)
+        let discovery = try await get(cloud.feedDiscoveryURL, accept: AVDFeed.discoveryContentType, token: token)
         var desktops: [AVDFeed.Desktop] = []
-        for feed in try AVDFeed.tenantFeeds(fromDiscovery: discovery) {
+        for feed in try AVDFeed.tenantFeeds(fromDiscovery: discovery, in: cloud) {
             let data = try await get(feed.url, accept: AVDFeed.feedContentType, token: token)
             desktops += try AVDFeed.desktops(fromFeed: data, of: feed)
         }
@@ -75,16 +75,16 @@ final class AVDFeedClient {
 
     private func signIn(loginHint: String?) async throws -> String {
         let verifier = Self.randomVerifier()
-        guard let request = RDPEntraSignInRequest(authorizeURL: Self.authorizeURL(verifier: verifier), loginHint: loginHint),
+        guard let request = RDPEntraSignInRequest(authorizeURL: Self.authorizeURL(in: cloud, verifier: verifier), loginHint: loginHint),
               let code = await signInPrompt(request, "Azure Virtual Desktop")
         else { throw AVDFeedClientError.signInCancelled }
 
-        var exchange = URLRequest(url: URL(string: "\(Self.authority)/token")!)
+        var exchange = URLRequest(url: URL(string: "\(Self.authority(in: cloud))/token")!)
         exchange.httpMethod = "POST"
         exchange.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         exchange.httpBody = Data(Self.form([
             "grant_type": "authorization_code", "client_id": Self.clientID, "code": code,
-            "redirect_uri": Self.redirectURI, "scope": Self.scope, "code_verifier": verifier,
+            "redirect_uri": Self.redirectURI(in: cloud), "scope": Self.scope(in: cloud), "code_verifier": verifier,
         ]).utf8)
         let (data, _) = try await transport(exchange)
         let response = try JSONDecoder().decode(TokenResponse.self, from: data)
@@ -95,10 +95,22 @@ final class AVDFeedClient {
         return token
     }
 
-    static func authorizeURL(verifier: String) -> String {
+    static func scope(in cloud: AVDCloud) -> String { "\(cloud.serviceResource)/.default openid profile" }
+    /// The client's registration differs by cloud: Azure US Government lists no
+    /// `nativeclient` address (AADSTS50011), only the Windows broker's, which
+    /// FreeRDP also signs in with. Nothing serves either; the code is read off the redirect.
+    static func redirectURI(in cloud: AVDCloud) -> String {
+        switch cloud {
+        case .commercial: "https://login.microsoftonline.com/common/oauth2/nativeclient"
+        case .usGovernment: "ms-appx-web://Microsoft.AAD.BrokerPlugin/\(clientID)"
+        }
+    }
+    static func authority(in cloud: AVDCloud) -> String { "https://\(cloud.entraHost)/organizations/oauth2/v2.0" }
+
+    static func authorizeURL(in cloud: AVDCloud, verifier: String) -> String {
         let challenge = Data(SHA256.hash(data: Data(verifier.utf8))).base64URLEncodedString()
-        return "\(authority)/authorize?" + form([
-            "client_id": clientID, "response_type": "code", "redirect_uri": redirectURI, "scope": scope,
+        return "\(authority(in: cloud))/authorize?" + form([
+            "client_id": clientID, "response_type": "code", "redirect_uri": redirectURI(in: cloud), "scope": scope(in: cloud),
             "code_challenge": challenge, "code_challenge_method": "S256", "prompt": "select_account",
         ])
     }

@@ -117,3 +117,46 @@ public struct AVDConnectionFile: Hashable, Sendable {
             usesEntraDesktopSignIn: settings["enablerdsaadauth"] == "1")))
     }
 }
+
+/// The Azure cloud a desktop lives in. Each cloud has its own Entra ID sign-in
+/// and its own Azure Virtual Desktop service, and an account exists in one.
+public enum AVDCloud: String, Hashable, Sendable, CaseIterable {
+    case commercial
+    case usGovernment
+
+    /// A gateway's cloud shows in its name: `*.wvd.microsoft.com` or `*.wvd.azure.us`.
+    public init(gatewayHost: String) {
+        self = gatewayHost.lowercased().hasSuffix(".azure.us") ? .usGovernment : .commercial
+    }
+
+    public var name: String {
+        switch self {
+        case .commercial: "Azure Commercial"
+        case .usGovernment: "Azure US Government"
+        }
+    }
+
+    /// Where Entra ID signs this cloud's accounts in.
+    public var entraHost: String {
+        switch self {
+        case .commercial: "login.microsoftonline.com"
+        case .usGovernment: "login.microsoftonline.us"
+        }
+    }
+
+    /// The Azure Virtual Desktop service a token is asked for.
+    public var serviceResource: String {
+        switch self {
+        case .commercial: "https://www.wvd.microsoft.com"
+        case .usGovernment: "https://www.wvd.azure.us"
+        }
+    }
+
+    /// The address users give the Windows App to subscribe to a workspace.
+    public var feedDiscoveryURL: URL {
+        switch self {
+        case .commercial: URL(string: "https://rdweb.wvd.microsoft.com/api/arm/feeddiscovery")!
+        case .usGovernment: URL(string: "https://rdweb.wvd.azure.us/api/arm/feeddiscovery")!
+        }
+    }
+}

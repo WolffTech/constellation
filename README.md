@@ -25,7 +25,7 @@ Constellation saves your remote machines and opens each session in a tab. It use
 - Supports custom terminal fonts, themes, and Ghostty configuration
 - Runs RDP sessions with NLA, HiDPI rendering, shared clipboard text, and a trust store for accepted certificates
 - Reaches RDP machines behind a Remote Desktop Gateway, with the desktop's account or a separate gateway account
-- Connects to Azure Virtual Desktop: sign in with your work account to pick a desktop from your workspace, or import its connection file
+- Connects to Azure Virtual Desktop in Azure and Azure US Government: sign in with your work account to pick a desktop from your workspace, or import its connection file
 - Opens VNC sessions in Constellation or Apple's Screen Sharing app
 - Stores credentials in the macOS Keychain
 

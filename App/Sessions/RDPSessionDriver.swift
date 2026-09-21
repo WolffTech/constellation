@@ -99,6 +99,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         let trustStore = self.trustStore
         let machineName = request.machineName
         let entraSignInPrompt = self.entraSignInPrompt
+        let credentialPrompt = self.credentialPrompt
         let session = RDPSession(
             configuration: configuration,
             password: { password },
@@ -106,7 +107,22 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
             verifyCertificate: { certificate in
                 await resolveCertificate(certificate, machineName: machineName, trustStore: trustStore, prompt: certificatePrompt)
             },
-            entraSignIn: { request in await entraSignInPrompt(request, machineName) })
+            entraSignIn: { request in await entraSignInPrompt(request, machineName) },
+            // Only a desktop that refuses its Entra ID sign-in gets here; the
+            // account was not asked for up front.
+            desktopCredentials: { [username, domain, password] in
+                if !username.isEmpty, let password {
+                    return RDPDesktopCredentials(username: username, domain: domain.isEmpty ? nil : domain, password: password)
+                }
+                guard let entry = credentialPrompt(RDPCredentialPrompt(
+                    machineName: machineName,
+                    username: username.isEmpty ? nil : username,
+                    domain: domain.isEmpty ? nil : domain,
+                    hasStoredPassword: password != nil)),
+                    let entered = entry.password ?? password
+                else { return nil }
+                return RDPDesktopCredentials(username: entry.username, domain: entry.domain.isEmpty ? nil : entry.domain, password: entered)
+            })
         session.displayMode = settings.defaultDisplayMode
         return session
     }
@@ -122,7 +138,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         case .sameAsDesktop:
             return (.sameAsDesktop, nil)
         case .azureVirtualDesktop(let resource):
-            return (.azureVirtualDesktop(RDPAzureVirtualDesktopResource(resource)), nil)
+            return (.azureVirtualDesktop(RDPAzureVirtualDesktopResource(resource, in: AVDCloud(gatewayHost: gateway.host))), nil)
         case .separate(let username, let domain, let id):
             (savedUsername, savedDomain, credentialID) = (username, domain, id)
         }
@@ -146,7 +162,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
 }
 
 private extension RDPAzureVirtualDesktopResource {
-    init(_ resource: AVDResource) {
+    init(_ resource: AVDResource, in cloud: AVDCloud) {
         self.init(
             endpointPool: resource.endpointPool,
             geo: resource.geo,
@@ -157,7 +173,8 @@ private extension RDPAzureVirtualDesktopResource {
             activityHint: resource.activityHint,
             loadBalanceInfo: resource.loadBalanceInfo,
             application: resource.application,
-            usesEntraDesktopSignIn: resource.usesEntraDesktopSignIn)
+            usesEntraDesktopSignIn: resource.usesEntraDesktopSignIn,
+            cloud: cloud == .usGovernment ? .usGovernment : .commercial)
     }
 }
 
