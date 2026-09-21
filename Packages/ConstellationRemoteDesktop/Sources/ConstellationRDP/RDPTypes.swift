@@ -90,8 +90,7 @@ public struct RDPAzureVirtualDesktopResource: Sendable, Equatable {
     public var loadBalanceInfo: String?
     /// The resource's id in its workspace, sent for desktops too.
     public var application: String?
-    /// The desktop also signs in with Entra ID, so no password is needed.
-    public var usesEntraDesktopSignIn: Bool
+    public var desktopSignIn: RDPAzureDesktopSignIn
     public var cloud: RDPAzureCloud
 
     public init(
@@ -104,7 +103,7 @@ public struct RDPAzureVirtualDesktopResource: Sendable, Equatable {
         activityHint: String? = nil,
         loadBalanceInfo: String? = nil,
         application: String? = nil,
-        usesEntraDesktopSignIn: Bool = false,
+        desktopSignIn: RDPAzureDesktopSignIn = .password,
         cloud: RDPAzureCloud = .commercial
     ) {
         self.endpointPool = endpointPool
@@ -116,9 +115,19 @@ public struct RDPAzureVirtualDesktopResource: Sendable, Equatable {
         self.activityHint = activityHint
         self.loadBalanceInfo = loadBalanceInfo
         self.application = application
-        self.usesEntraDesktopSignIn = usesEntraDesktopSignIn
+        self.desktopSignIn = desktopSignIn
         self.cloud = cloud
     }
+}
+
+/// How the desktop behind an Azure Virtual Desktop gateway signs its user in.
+public enum RDPAzureDesktopSignIn: Sendable, Equatable {
+    case password
+    /// Entra ID, so no password is needed. A desktop that refuses it is asked
+    /// again with a username and password.
+    case entraID
+    /// A desktop known to refuse the Entra ID sign-in its connection file promises.
+    case passwordInsteadOfEntraID
 }
 
 /// The Azure cloud whose Entra ID signs the user in to a gateway.

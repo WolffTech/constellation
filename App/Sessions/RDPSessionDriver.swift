@@ -62,7 +62,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         var password = request.credentialID.flatMap { try? vault.retrieve(id: $0) }?.withValue { $0 }
 
         // A desktop that signs in with Entra ID takes no password.
-        let needsPassword = request.gateway?.azureVirtualDesktop?.usesEntraDesktopSignIn != true
+        let needsPassword = request.gateway?.azureVirtualDesktop?.desktopSignIn != .entraID
         if needsPassword, username.isEmpty || password == nil {
             guard let entry = credentialPrompt(RDPCredentialPrompt(
                 machineName: request.machineName,
@@ -173,8 +173,18 @@ private extension RDPAzureVirtualDesktopResource {
             activityHint: resource.activityHint,
             loadBalanceInfo: resource.loadBalanceInfo,
             application: resource.application,
-            usesEntraDesktopSignIn: resource.usesEntraDesktopSignIn,
+            desktopSignIn: RDPAzureDesktopSignIn(resource.desktopSignIn),
             cloud: cloud == .usGovernment ? .usGovernment : .commercial)
+    }
+}
+
+private extension RDPAzureDesktopSignIn {
+    init(_ signIn: AVDDesktopSignIn) {
+        self = switch signIn {
+        case .password: .password
+        case .entraID: .entraID
+        case .passwordInsteadOfEntraID: .passwordInsteadOfEntraID
+        }
     }
 }
 
