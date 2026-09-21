@@ -80,6 +80,12 @@ public enum AVDDesktopSignIn: String, Hashable, Sendable, Codable {
     case password
     /// Entra ID, as the connection file promises, so no password is needed.
     case entraID
+    /// The connection file promises Entra ID, but the desktop refuses it and
+    /// the user chose to skip the attempt.
+    case passwordInsteadOfEntraID
+
+    /// Whether the connection file promises an Entra ID sign-in.
+    public var isOfferedEntraID: Bool { self != .password }
 }
 
 public enum AVDConnectionFileError: Error, Hashable, Sendable, LocalizedError {

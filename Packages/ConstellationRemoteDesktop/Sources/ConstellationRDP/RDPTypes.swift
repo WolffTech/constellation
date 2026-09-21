@@ -126,6 +126,8 @@ public enum RDPAzureDesktopSignIn: Sendable, Equatable {
     /// Entra ID, so no password is needed. A desktop that refuses it is asked
     /// again with a username and password.
     case entraID
+    /// A desktop known to refuse the Entra ID sign-in its connection file promises.
+    case passwordInsteadOfEntraID
 }
 
 /// The Azure cloud whose Entra ID signs the user in to a gateway.

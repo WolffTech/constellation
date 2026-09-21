@@ -183,6 +183,7 @@ private extension RDPAzureDesktopSignIn {
         self = switch signIn {
         case .password: .password
         case .entraID: .entraID
+        case .passwordInsteadOfEntraID: .passwordInsteadOfEntraID
         }
     }
 }

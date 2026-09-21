@@ -60,6 +60,11 @@ struct AVDConnectionFileTests {
         #expect(try JSONDecoder().decode(AVDResource.self, from: saved) == AVDResource(tenantID: "tenant", desktopSignIn: .entraID))
     }
 
+    @Test func theChosenDesktopSignInSurvivesSaving() throws {
+        let resource = AVDResource(tenantID: "tenant", desktopSignIn: .passwordInsteadOfEntraID)
+        #expect(try JSONDecoder().decode(AVDResource.self, from: JSONEncoder().encode(resource)) == resource)
+    }
+
     @Test func aGatewayWithoutAPortUsesTheDefault() throws {
         let file = try AVDConnectionFile(contents: contents.replacingOccurrences(of: ".com:443", with: ".com"))
         #expect(file.gateway.host == "afdfp-rdgateway-r1.wvd.microsoft.com")

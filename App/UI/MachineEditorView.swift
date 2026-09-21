@@ -552,7 +552,14 @@ private struct RDPProfileForm: View {
                     LabeledContent("Gateway", value: "\(draft.gateway.host):\(draft.gateway.port)")
                     LabeledContent("Cloud", value: AVDCloud(gatewayHost: draft.gateway.host).name)
                     if let tenant = resource.tenantID { LabeledContent("Tenant", value: tenant) }
-                    LabeledContent("Desktop sign-in", value: resource.desktopSignIn == .entraID ? "Microsoft Entra ID" : "Username and password")
+                    if resource.desktopSignIn.isOfferedEntraID {
+                        Picker("Desktop sign-in", selection: desktopSignIn) {
+                            Text("Microsoft Entra ID").tag(AVDDesktopSignIn.entraID)
+                            Text("Username and password").tag(AVDDesktopSignIn.passwordInsteadOfEntraID)
+                        }
+                    } else {
+                        LabeledContent("Desktop sign-in", value: "Username and password")
+                    }
                     azureVirtualDesktopSources
                     Button("Remove Azure Virtual Desktop", role: .destructive) {
                         draft.gateway = RDPGatewayDraft()
@@ -560,7 +567,8 @@ private struct RDPProfileForm: View {
                 } header: {
                     Text("Azure Virtual Desktop")
                 } footer: {
-                    Text("You sign in to Microsoft Entra ID in a browser window when connecting. A username in the form name@example.com picks that account on the sign-in page.")
+                    Text("You sign in to Microsoft Entra ID in a browser window when connecting. A username in the form name@example.com picks that account on the sign-in page."
+                        + (resource.desktopSignIn.isOfferedEntraID ? " A desktop that refuses the Entra ID sign-in connects faster with a username and password." : ""))
                 }
             } else {
                 Section {
@@ -663,6 +671,13 @@ private struct RDPProfileForm: View {
         Binding(
             get: { draft.profile.domain ?? "" },
             set: { draft.profile.domain = $0.isEmpty ? nil : $0 })
+    }
+
+    /// Only offered for a desktop whose connection file promises Entra ID.
+    private var desktopSignIn: Binding<AVDDesktopSignIn> {
+        Binding(
+            get: { draft.gateway.azureVirtualDesktop?.desktopSignIn ?? .entraID },
+            set: { draft.gateway.azureVirtualDesktop?.desktopSignIn = $0 })
     }
 }
 

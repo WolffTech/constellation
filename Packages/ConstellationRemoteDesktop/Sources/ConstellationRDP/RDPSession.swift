@@ -167,9 +167,11 @@ public final class RDPSession: RemoteDesktopSession {
         // is the only other place they live.
         let account = desktopCredentials
         // FreeRDP signs an Azure Virtual Desktop account without a domain in
-        // to "AzureAD". A desktop that refused Entra ID is not joined to it,
+        // to "AzureAD". A desktop that refuses Entra ID is not joined to it,
         // so an empty domain is sent to keep that default away.
-        let domain = account == nil ? configuration.domain : account?.domain ?? ""
+        let refusesEntraID = account != nil || resource?.desktopSignIn == .passwordInsteadOfEntraID
+        let givenDomain = account == nil ? configuration.domain : account?.domain
+        let domain = givenDomain ?? (refusesEntraID ? "" : nil)
         let strings = [
             configuration.host, account?.username ?? configuration.username,
             domain, account?.password ?? password,

@@ -190,4 +190,28 @@ struct RemoteDesktopSettingsTests {
         // Only the desktop's account: the gateway's comes from the sign-in page.
         #expect(prompts == [RDPCredentialPrompt(machineName: "Cloud PC", username: nil, domain: nil, hasStoredPassword: false)])
     }
+
+    @Test func rdpDriverAsksForThePasswordUpFrontWhenEntraDesktopSignInIsTurnedOff() throws {
+        var prompts: [RDPCredentialPrompt] = []
+        let driver = FreeRDPSessionDriver(
+            vault: InMemoryCredentialVault(),
+            trustStore: InMemoryTrustStore(),
+            credentialPrompt: { prompt in
+                prompts.append(prompt)
+                return RDPCredentialEntry(username: "nick@example.com", domain: "", password: "pa55")
+            },
+            certificatePrompt: { _, _, _ in .reject },
+            entraSignInPrompt: { _, _ in nil })
+        let gateway = RDPGateway(
+            host: "rdgateway.wvd.microsoft.com",
+            credentials: .azureVirtualDesktop(AVDResource(desktopSignIn: .passwordInsteadOfEntraID)))
+
+        let session = try #require(driver.start(RDPSessionRequest(
+            host: "rdgateway.wvd.microsoft.com", port: 3389, username: nil, domain: nil, credentialID: nil,
+            sharesClipboard: false, gateway: gateway, machineName: "Cloud PC")) as? RDPSession)
+
+        #expect(prompts.count == 1)
+        #expect(session.configuration.gateway?.account == .azureVirtualDesktop(
+            RDPAzureVirtualDesktopResource(desktopSignIn: .passwordInsteadOfEntraID)))
+    }
 }
