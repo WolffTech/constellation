@@ -129,13 +129,21 @@ private struct SessionDisplayActions: View {
 
     var body: some View {
         if sessions.remoteDesktop(for: summary.id) != nil {
-            Picker("Display", selection: Binding(
-                get: { summary.displayMode ?? .fit },
-                set: { sessions.setDisplayMode($0, for: summary.id) })) {
-                Label("Fit to Window", systemImage: "arrow.down.right.and.arrow.up.left").tag(RemoteDesktopDisplayMode.fit)
-                Label("Actual Size", systemImage: "1.magnifyingglass").tag(RemoteDesktopDisplayMode.actualSize)
+            // A menu-style Picker reserves room for its widest option title
+            // even when the toolbar shows icons only, so it goes in a Menu.
+            Menu {
+                Picker("Display", selection: Binding(
+                    get: { displayMode },
+                    set: { sessions.setDisplayMode($0, for: summary.id) })) {
+                    Label("Fit to Window", systemImage: Self.symbol(for: .fit)).tag(RemoteDesktopDisplayMode.fit)
+                    Label("Actual Size", systemImage: Self.symbol(for: .actualSize)).tag(RemoteDesktopDisplayMode.actualSize)
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                Label("Display", systemImage: Self.symbol(for: displayMode))
             }
-            .pickerStyle(.menu)
+            .menuIndicator(.hidden)
             .help("Display")
         }
         if let url = Self.screenSharingURL(for: summary) {
@@ -143,6 +151,15 @@ private struct SessionDisplayActions: View {
                 Label("Open in Screen Sharing", systemImage: "macwindow.on.rectangle")
             }
             .help("Open in Apple’s Screen Sharing app")
+        }
+    }
+
+    private var displayMode: RemoteDesktopDisplayMode { summary.displayMode ?? .fit }
+
+    private static func symbol(for mode: RemoteDesktopDisplayMode) -> String {
+        switch mode {
+        case .fit: "arrow.down.right.and.arrow.up.left"
+        case .actualSize: "1.magnifyingglass"
         }
     }
 
