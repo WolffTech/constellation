@@ -179,7 +179,7 @@ private struct QuickSetupForm: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .editorFormStyle()
     }
 
     private var usernamePrompt: String {
@@ -325,7 +325,7 @@ private struct GeneralForm: View {
                     .lineLimit(3...8)
             }
         }
-        .formStyle(.grouped)
+        .editorFormStyle()
     }
 }
 
@@ -379,7 +379,7 @@ private struct AddressForm: View {
                 Text("Profiles set to automatic try addresses in the order listed; drag to reorder.")
             }
         }
-        .formStyle(.grouped)
+        .editorFormStyle()
     }
 }
 
@@ -456,7 +456,7 @@ private struct SSHProfileForm: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .editorFormStyle()
     }
 
     private var username: Binding<String> {
@@ -506,7 +506,7 @@ private struct VNCProfileForm: View {
                     systemImage: "lock.open")
             }
         }
-        .formStyle(.grouped)
+        .editorFormStyle()
     }
 
     private var username: Binding<String> {
@@ -604,7 +604,7 @@ private struct RDPProfileForm: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .editorFormStyle()
         .alert("Azure Virtual Desktop could not be set up", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
             Button("OK") { importError = nil }
         } message: {
@@ -732,5 +732,14 @@ enum AVDDesktopPicker {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn, desktops.indices.contains(popup.indexOfSelectedItem) else { return nil }
         return desktops[popup.indexOfSelectedItem]
+    }
+}
+
+private extension View {
+    /// Grouped forms right-align field text on macOS, so a trailing space
+    /// hangs past the edge and stays invisible until the next character.
+    /// Leading alignment shows it as it is typed.
+    func editorFormStyle() -> some View {
+        formStyle(.grouped).multilineTextAlignment(.leading)
     }
 }
