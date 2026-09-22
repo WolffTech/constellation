@@ -20,6 +20,7 @@ Constellation saves your remote machines and opens each session in a tab. It use
 
 - Saves multiple addresses and connection profiles for each machine
 - Opens sessions in tabs and restores the tabs from your previous workspace
+- Moves a tab into a window of its own, and merges windows back into one
 - Opens the current Mac's login shell from the built-in This Mac sidebar entry
 - Runs SSH sessions in a Metal-rendered terminal that uses your existing OpenSSH configuration, keys, and agent
 - Supports custom terminal fonts, themes, and Ghostty configuration

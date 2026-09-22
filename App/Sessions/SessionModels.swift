@@ -118,8 +118,17 @@ enum SessionState: Equatable, Sendable {
     }
 }
 
+/// Identifies the window a session tab lives in. Sessions that share one
+/// are tabs of the same window. Never persisted: every launch starts with
+/// all restored tabs in one window.
+struct SessionWindowID: Hashable, Sendable {
+    private let raw = UUID()
+    init() {}
+}
+
 struct SessionSummary: Identifiable, Equatable, Sendable {
     let id: SessionID
+    var windowID: SessionWindowID
     var target: SessionTarget
     var title: String
     var machineName: String?

@@ -25,6 +25,8 @@ enum ShortcutAction: String, CaseIterable, Codable, CodingKeyRepresentable, Iden
     case disconnect
     case nextTab
     case previousTab
+    case moveTabToNewWindow
+    case mergeAllWindows
     case findInSession
     case fitToWindow
     case actualSize
@@ -49,6 +51,8 @@ enum ShortcutAction: String, CaseIterable, Codable, CodingKeyRepresentable, Iden
         case .disconnect: "Disconnect"
         case .nextTab: "Next Tab"
         case .previousTab: "Previous Tab"
+        case .moveTabToNewWindow: "Move Tab to New Window"
+        case .mergeAllWindows: "Merge All Windows"
         case .findInSession: "Find in Session"
         case .fitToWindow: "Fit to Window"
         case .actualSize: "Actual Size"
@@ -69,7 +73,8 @@ enum ShortcutAction: String, CaseIterable, Codable, CodingKeyRepresentable, Iden
         switch self {
         case .newMachine, .editMachine, .importMachines, .exportMachines, .closeSession, .closeOtherSessions, .closeWindow: "File"
         case .commandPalette, .fitToWindow, .actualSize: "View"
-        case .quickConnect, .newLocalTerminal, .connectDefaultProfile, .reconnect, .disconnect, .nextTab, .previousTab, .findInSession: "Session"
+        case .quickConnect, .newLocalTerminal, .connectDefaultProfile, .reconnect, .disconnect, .nextTab, .previousTab, .moveTabToNewWindow,
+             .mergeAllWindows, .findInSession: "Session"
         case .saveSupportBundle: "Help"
         }
     }
@@ -90,6 +95,7 @@ enum ShortcutAction: String, CaseIterable, Codable, CodingKeyRepresentable, Iden
         case .disconnect: nil
         case .nextTab: Shortcut(.tab, [.control])
         case .previousTab: Shortcut(.tab, [.control, .shift])
+        case .moveTabToNewWindow, .mergeAllWindows: nil
         case .findInSession: Shortcut(.character("f"), [.command])
         case .fitToWindow, .actualSize: nil
         }

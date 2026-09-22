@@ -59,10 +59,13 @@ struct ConstellationApp: App {
                 ForEach(1...9, id: \.self) { number in
                     Button("Select Tab \(number)") { root.sessions?.select(number: number) }
                         .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
-                        .disabled(root.sessions?.sessions.indices.contains(number - 1) != true)
+                        .disabled(root.sessions?.activeWindowSessions.indices.contains(number - 1) != true)
                 }
                 CommandButton(.nextTab, root: root)
                 CommandButton(.previousTab, root: root)
+                Divider()
+                CommandButton(.moveTabToNewWindow, root: root)
+                CommandButton(.mergeAllWindows, root: root)
                 Divider()
                 CommandButton(.findInSession, root: root)
             }

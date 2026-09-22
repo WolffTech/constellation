@@ -5,7 +5,8 @@ import AppKit
 import ConstellationCore
 import SwiftUI
 
-/// Keeps open sessions and AppKit's native window tabs in sync.
+/// Keeps open sessions and AppKit's native window tabs in sync. Each
+/// `SessionWindowID` in the coordinator becomes one native tab group.
 @MainActor
 final class SessionWindowManager: NSObject, NSWindowDelegate {
     weak var root: CompositionRoot?
@@ -13,21 +14,18 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
     private weak var browserWindow: NSWindow?
     private var windows: [SessionID: SessionWindow] = [:]
     private var isReconciling = false
-    private weak var observedTabGroup: NSWindowTabGroup?
-    private var tabWindowsObservation: NSKeyValueObservation?
-    private var selectedWindowObservation: NSKeyValueObservation?
-    private var reconciledSessionIDs: [SessionID] = []
+    private var reconciledLayout: [[SessionID]] = []
 
     override init() {
         super.init()
         NotificationCenter.default.addObserver(
-            self, selector: #selector(synchronizeNativeTabOrder),
+            self, selector: #selector(synchronizeNativeLayout),
             name: NSApplication.didUpdateNotification, object: nil)
     }
 
     func update(browserWindow: NSWindow) {
-        // A native drag can reorder tabs without notifying observers of `windows`.
-        synchronizeNativeTabOrder()
+        // A native drag can regroup or reorder tabs without notifying any observer.
+        synchronizeNativeLayout()
         guard let coordinator = root?.sessions else { return }
         self.browserWindow = browserWindow
         reconcile(sessions: coordinator.sessions)
@@ -38,7 +36,7 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
             browserWindow.orderOut(nil)
         } else if selectedSessionID == nil {
             let activeWindow = orderedWindows.first(where: \.isKeyWindow)
-                ?? orderedWindows.first(where: { $0.tabGroup?.selectedWindow === $0 })
+                ?? coordinator.activeWindowSessions.first.flatMap { windows[$0.id] }
                 ?? orderedWindows.first
             SessionWindowHandoff.showBrowser(browserWindow, alongside: activeWindow)
         }
@@ -51,6 +49,14 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         }
     }
 
+    func moveToNewWindow(_ sessionID: SessionID) {
+        root?.sessions?.moveToNewWindow(sessionID: sessionID)
+    }
+
+    func mergeAllWindows() {
+        root?.sessions?.mergeAllWindows()
+    }
+
     func presentQuickConnect() {
         root?.perform(.quickConnect)
     }
@@ -61,8 +67,15 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         return false
     }
 
+    /// Clicking a tab or a window makes it key, so this is the one path for native selection.
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard !isReconciling, let window = notification.object as? SessionWindow,
+              let sessions = root?.sessions, sessions.selectedSessionID != window.sessionID else { return }
+        sessions.select(window.sessionID)
+    }
+
     private func reconcile(sessions: [SessionSummary]) {
-        guard !isReconciling, let root, let browserWindow else { return }
+        guard !isReconciling, let root, let browserWindow, let coordinator = root.sessions else { return }
         isReconciling = true
         defer { isReconciling = false }
 
@@ -73,7 +86,6 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         if sessions.isEmpty, let outgoingWindow = closingWindows.first(where: \.isKeyWindow)
             ?? closingWindows.first(where: { $0.tabGroup?.selectedWindow === $0 })
             ?? closingWindows.first {
-            stopObservingTabGroup()
             showBrowserWindow(browserWindow, replacing: outgoingWindow)
         }
 
@@ -82,8 +94,14 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
             window.closeFromCoordinator()
         }
 
-        for summary in sessions where windows[summary.id] == nil {
-            windows[summary.id] = makeWindow(for: summary, root: root, matching: browserWindow)
+        let layout = coordinator.windowLayout
+        for tabIDs in layout {
+            for id in tabIDs where windows[id] == nil {
+                guard let summary = sessions.first(where: { $0.id == id }) else { continue }
+                // A new tab joins its window's group; a new window starts from the browser's frame.
+                let anchor = tabIDs.compactMap { windows[$0] }.first ?? orderedWindows.first
+                windows[id] = makeWindow(for: summary, root: root, anchor: anchor, matching: browserWindow)
+            }
         }
 
         for summary in sessions {
@@ -91,15 +109,17 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
             window.tab.title = summary.tabTitle
             window.tab.toolTip = tabToolTip(for: summary)
             window.updateTabStatus(summary.tabStatus)
-            window.revealsCloseButtonAsOnlyTab = sessions.count == 1
+            window.revealsCloseButtonAsOnlyTab = coordinator.sessions(in: summary.windowID).count == 1
         }
 
-        applyTabOrder(sessions.map(\.id))
-        reconciledSessionIDs = sessions.map(\.id)
-        observeTabGroupIfNeeded()
+        SessionWindowLayout.apply(layout.map { $0.compactMap { windows[$0] } })
+        reconciledLayout = layout
+        // A tab that just left its group starts without a tab bar.
+        for window in orderedWindows {
+            showTabBarIfNeeded(on: window)
+        }
 
         if sessions.isEmpty {
-            stopObservingTabGroup()
             if !browserWindow.isVisible {
                 browserWindow.makeKeyAndOrderFront(nil)
             }
@@ -108,7 +128,9 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         }
     }
 
-    private func makeWindow(for summary: SessionSummary, root: CompositionRoot, matching browserWindow: NSWindow) -> SessionWindow {
+    private func makeWindow(
+        for summary: SessionSummary, root: CompositionRoot, anchor: SessionWindow?, matching browserWindow: NSWindow
+    ) -> SessionWindow {
         let content = ContentView(root: root, sessionID: summary.id, managesSessionWindows: false)
             .environment(root)
             .environment(root.shortcuts)
@@ -132,7 +154,7 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.animationBehavior = .none
 
-        if let anchor = orderedWindows.first {
+        if let anchor {
             anchor.addTabbedWindow(window, ordered: .above)
         } else {
             // Keep the first session in the existing virtual window while the
@@ -143,23 +165,14 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         return window
     }
 
-    private func applyTabOrder(_ orderedIDs: [SessionID]) {
-        guard let anchor = orderedWindows.first,
-              let group = anchor.tabGroup else { return }
-        SessionWindowTabOrder.apply(orderedIDs.compactMap { windows[$0] }, to: group)
-    }
-
-    private func storeTabOrder(_ ids: [SessionID]) {
+    /// Mirrors AppKit's grouping and tab order into the coordinator.
+    @objc private func synchronizeNativeLayout() {
         guard !isReconciling, let sessions = root?.sessions,
-              sessions.sessions.map(\.id) == reconciledSessionIDs else { return }
-        sessions.reorderSessions(ids)
-        reconciledSessionIDs = sessions.sessions.map(\.id)
-    }
-
-    @objc private func synchronizeNativeTabOrder() {
-        guard let group = observedTabGroup else { return }
-        // Do not overwrite a model-driven reorder that has not reached AppKit yet.
-        storeTabOrder(group.windows.compactMap { ($0 as? SessionWindow)?.sessionID })
+              // Do not overwrite a model-driven change that has not reached AppKit yet.
+              sessions.windowLayout == reconciledLayout else { return }
+        let layout = SessionWindowLayout.native(of: orderedWindows).map { $0.map(\.sessionID) }
+        sessions.applyWindowLayout(layout)
+        reconciledLayout = sessions.windowLayout
     }
 
     private func select(_ window: NSWindow) {
@@ -190,34 +203,6 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
         }
     }
 
-    private func observeTabGroupIfNeeded() {
-        let group = orderedWindows.first?.tabGroup
-        guard observedTabGroup !== group else { return }
-        stopObservingTabGroup()
-        guard let group else { return }
-        observedTabGroup = group
-        tabWindowsObservation = group.observe(\.windows, options: [.new]) { [weak self] group, _ in
-            let ids = group.windows.compactMap { ($0 as? SessionWindow)?.sessionID }
-            MainActor.assumeIsolated {
-                self?.storeTabOrder(ids)
-                self?.observeTabGroupIfNeeded()
-            }
-        }
-        selectedWindowObservation = group.observe(\.selectedWindow, options: [.new]) { [weak self] group, _ in
-            let id = (group.selectedWindow as? SessionWindow)?.sessionID
-            MainActor.assumeIsolated {
-                guard let self, !self.isReconciling, let id else { return }
-                self.root?.sessions?.select(id)
-            }
-        }
-    }
-
-    private func stopObservingTabGroup() {
-        tabWindowsObservation = nil
-        selectedWindowObservation = nil
-        observedTabGroup = nil
-    }
-
     private var orderedWindows: [SessionWindow] {
         guard let sessions = root?.sessions?.sessions else { return [] }
         return sessions.compactMap { windows[$0.id] }
@@ -233,6 +218,66 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
 }
 
 @MainActor
+enum SessionWindowLayout {
+    /// Groups `windows` by native tab group, each in native tab order. Groups
+    /// come in the order of their first window in `windows`.
+    static func native<Window: NSWindow>(of windows: [Window]) -> [[Window]] {
+        var seen = Set<ObjectIdentifier>()
+        var layout: [[Window]] = []
+        for window in windows {
+            guard let group = window.tabGroup else {
+                layout.append([window])
+                continue
+            }
+            guard seen.insert(ObjectIdentifier(group)).inserted else { continue }
+            layout.append(group.windows.compactMap { $0 as? Window })
+        }
+        return layout
+    }
+
+    /// Makes AppKit's tab groups match `layout`: one group per inner array, in
+    /// that tab order. A window leaving a group for one of its own is offset
+    /// so it does not sit exactly over the window it came from.
+    static func apply(_ layout: [[NSWindow]]) {
+        var claimed = Set<ObjectIdentifier>()
+        for windows in layout {
+            guard let anchor = windows.first else { continue }
+            let group = windows.lazy.compactMap(\.tabGroup).first { !claimed.contains(ObjectIdentifier($0)) }
+            if let group {
+                claimed.insert(ObjectIdentifier(group))
+                SessionWindowTabOrder.apply(windows, to: group)
+            } else {
+                // Every member sits in a group owned by another window; start a new one.
+                detach(anchor)
+                for window in windows.dropFirst() {
+                    anchor.addTabbedWindow(window, ordered: .above)
+                }
+                if let group = anchor.tabGroup {
+                    claimed.insert(ObjectIdentifier(group))
+                    SessionWindowTabOrder.apply(windows, to: group)
+                }
+            }
+        }
+    }
+
+    private static func detach(_ window: NSWindow) {
+        guard let group = window.tabGroup, group.windows.count > 1 else { return }
+        let frame = window.frame.offsetBy(dx: 40, dy: -40)
+        group.removeWindow(window)
+        // A tab that was not selected is hidden, and stays so after leaving its
+        // group. Ordering it front with `.preferred` tabbing would put it
+        // straight back into a group, so tabbing is off for that call.
+        let tabbingMode = window.tabbingMode
+        window.tabbingMode = .disallowed
+        window.orderFront(nil)
+        window.tabbingMode = tabbingMode
+        // Ordering front resets the frame to the group's, so the offset comes
+        // after; `setFrameOrigin` is ignored at this point, `setFrame` is not.
+        window.setFrame(frame, display: true)
+    }
+}
+
+@MainActor
 enum SessionWindowTabOrder {
     static func apply(_ windows: [NSWindow], to group: NSWindowTabGroup) {
         let selectedWindow = group.selectedWindow
@@ -240,8 +285,9 @@ enum SessionWindowTabOrder {
             guard group.windows[safe: index] !== window else { continue }
             // Reinserting an existing member without removing it first can leave
             // stale tab-bar items that crash a later browser window handoff.
-            if group.windows.contains(where: { $0 === window }) {
-                group.removeWindow(window)
+            // A member of another group has to leave it before joining this one.
+            if let current = window.tabGroup {
+                current.removeWindow(window)
             }
             group.insertWindow(window, at: index)
         }
@@ -311,6 +357,15 @@ private final class SessionWindow: NSWindow {
 
     override func newWindowForTab(_ sender: Any?) {
         manager?.presentQuickConnect()
+    }
+
+    // The Window menu and tab context menu send these; the coordinator owns the layout.
+    override func moveTabToNewWindow(_ sender: Any?) {
+        manager?.moveToNewWindow(sessionID)
+    }
+
+    override func mergeAllWindows(_ sender: Any?) {
+        manager?.mergeAllWindows()
     }
 
     // AppKit installs the tab bar through this call, so its buttons exist afterwards.

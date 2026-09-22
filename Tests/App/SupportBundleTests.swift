@@ -9,7 +9,8 @@ import Testing
 struct SupportBundleTests {
     private func summary(state: SessionState, kind: ConnectionProtocol = .rdp) -> SessionSummary {
         var summary = SessionSummary(
-            id: SessionID(), target: .saved(machineID: MachineID(), profileID: ProfileID()), title: "wolff-gm01", machineName: "Wolff-GM01",
+            id: SessionID(), windowID: SessionWindowID(), target: .saved(machineID: MachineID(), profileID: ProfileID()),
+            title: "wolff-gm01", machineName: "Wolff-GM01",
             profileName: "RDP", state: state, endpoint: nil)
         summary.kind = .connection(kind)
         return summary
@@ -20,7 +21,7 @@ struct SupportBundleTests {
         #expect(SupportBundle.line(for: failed) == "rdp failed (remote desktop error) fit")
         #expect(SupportBundle.line(for: summary(state: .disconnected, kind: .ssh)) == "ssh disconnected")
         let local = SessionSummary(
-            id: SessionID(), target: .local, title: "This Mac", machineName: "This Mac",
+            id: SessionID(), windowID: SessionWindowID(), target: .local, title: "This Mac", machineName: "This Mac",
             profileName: "Terminal", state: .running(startedAt: .now), kind: .localTerminal)
         #expect(SupportBundle.line(for: local) == "local running")
     }
