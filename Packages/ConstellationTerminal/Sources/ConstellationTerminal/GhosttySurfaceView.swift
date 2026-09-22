@@ -413,25 +413,37 @@ public final class GhosttySurfaceView: NSView {
 
     // MARK: Clipboard callbacks
 
-    func readClipboard(location: ghostty_clipboard_e, state: UnsafeMutableRawPointer?) -> Bool {
-        guard let surface, location == GHOSTTY_CLIPBOARD_STANDARD,
-              let string = NSPasteboard.general.string(forType: .string) else { return false }
-        string.withCString { pointer in
-            ghostty_surface_complete_clipboard_request(surface, pointer, state, false)
+    /// Reports what the pasteboard can serve; libghostty applies policy and
+    /// comes back through `confirmReadClipboard` when a prompt is needed.
+    func readClipboard(
+        location: ghostty_clipboard_e,
+        state: UnsafeMutableRawPointer?,
+        mimes: UnsafePointer<UnsafePointer<CChar>?>?,
+        count: Int,
+        list: Bool
+    ) -> ghostty_clipboard_read_result_e {
+        guard let surface, location == GHOSTTY_CLIPBOARD_STANDARD else {
+            return GHOSTTY_CLIPBOARD_READ_UNSUPPORTED
         }
-        return true
+        let pasteboard = NSPasteboard.general
+        let hasText = pasteboard.types?.contains(.string) ?? false
+        let text = TerminalClipboard.requestsText(mimes, count: count) ? pasteboard.string(forType: .string) : nil
+        guard text != nil || list else { return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE }
+        TerminalClipboard.complete(surface, text: text, listsText: list && hasText, state: state, confirmed: false)
+        return GHOSTTY_CLIPBOARD_READ_STARTED
     }
 
     func confirmReadClipboard(
-        string: UnsafePointer<CChar>?,
+        _ confirm: UnsafePointer<ghostty_clipboard_confirm_s>?,
         state: UnsafeMutableRawPointer?,
         request: ghostty_clipboard_request_e
     ) {
-        guard let surface, let string else { return }
-        let contents = String(cString: string)
-        // Only pastes the user initiated may proceed. OSC 52 reads stay denied.
-        guard request == GHOSTTY_CLIPBOARD_REQUEST_PASTE else {
-            ghostty_surface_complete_clipboard_request(surface, "", state, true)
+        guard let surface else { return }
+        // Only pastes the user initiated may proceed. OSC 52 and Kitty reads stay denied.
+        guard TerminalClipboard.mayPrompt(request), let confirm,
+              let text = TerminalClipboard.text(in: confirm.pointee.contents, count: confirm.pointee.contents_len)
+        else {
+            ghostty_surface_deny_clipboard_request(surface, state)
             return
         }
         let alert = NSAlert()
@@ -439,10 +451,11 @@ public final class GhosttySurfaceView: NSView {
         alert.informativeText = "This program does not use bracketed paste, so each line will run as if you typed it and pressed Return."
         alert.addButton(withTitle: "Paste")
         alert.addButton(withTitle: "Cancel")
-        let approved = alert.runModal() == .alertFirstButtonReturn
-        (approved ? contents : "").withCString { pointer in
-            ghostty_surface_complete_clipboard_request(surface, pointer, state, true)
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            ghostty_surface_deny_clipboard_request(surface, state)
+            return
         }
+        TerminalClipboard.complete(surface, text: text, listsText: false, state: state, confirmed: true)
     }
 
     func writeClipboard(
@@ -451,15 +464,8 @@ public final class GhosttySurfaceView: NSView {
         count: Int,
         confirm: Bool
     ) {
-        guard location == GHOSTTY_CLIPBOARD_STANDARD, let content, count > 0 else { return }
-        var text: String?
-        for index in 0..<count {
-            let item = content[index]
-            guard let mime = item.mime, String(cString: mime) == "text/plain", let data = item.data else { continue }
-            text = String(cString: data)
-            break
-        }
-        guard let text else { return }
+        guard location == GHOSTTY_CLIPBOARD_STANDARD,
+              let text = TerminalClipboard.text(in: content, count: count) else { return }
         if confirm {
             let alert = NSAlert()
             alert.messageText = "Allow the terminal to write to the clipboard?"

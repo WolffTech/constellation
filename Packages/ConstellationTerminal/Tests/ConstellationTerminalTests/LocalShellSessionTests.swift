@@ -100,6 +100,27 @@ struct LocalShellSessionTests {
         #expect(after.rows > before.rows)
     }
 
+    /// Drives libghostty's clipboard read callback end to end. Single-line text
+    /// needs no confirmation prompt, so the paste completes without a modal.
+    @Test func pastingServesThePasteboardText() throws {
+        let session = try Self.runtime().makeSession(command: TerminalCommand(executable: "/bin/cat"))
+        let window = host(session)
+        let pasteboard = NSPasteboard.general
+        let previous = pasteboard.string(forType: .string)
+        defer {
+            session.close()
+            window.close()
+            pasteboard.clearContents()
+            if let previous { pasteboard.setString(previous, forType: .string) }
+        }
+
+        #expect(waitUntil { session.foregroundProcessID() != nil })
+        pasteboard.clearContents()
+        pasteboard.setString("constellation-paste", forType: .string)
+        #expect(session.performBinding("paste_from_clipboard"))
+        #expect(waitUntil { session.visibleText().contains("constellation-paste") })
+    }
+
     @Test func searchBindingsReachTheSurface() throws {
         let session = try Self.runtime().makeSession(command: TerminalCommand(executable: "/bin/cat"))
         let window = host(session)
