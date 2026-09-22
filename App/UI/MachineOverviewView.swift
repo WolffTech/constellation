@@ -357,8 +357,8 @@ struct MachineOverviewView: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
-        .frame(maxWidth: 760, alignment: .leading)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle(machine.name)
         .navigationSubtitle("")
         .toolbar {
