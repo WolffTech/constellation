@@ -31,6 +31,10 @@ public final class GhosttySurfaceView: NSView {
 
     private(set) var cellSize: CGSize = .zero
     private(set) var focused = false
+    /// Last visibility pushed to libghostty. Surfaces start visible, so a
+    /// view that never joins a window keeps rendering until told otherwise.
+    private(set) var visible = true
+    nonisolated(unsafe) private var occlusionObserver: NSObjectProtocol?
     /// Background of the configuration libghostty last applied to this
     /// surface, after theme and light/dark resolution.
     public private(set) var backgroundColor: NSColor?
@@ -64,6 +68,7 @@ public final class GhosttySurfaceView: NSView {
     }
 
     deinit {
+        if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
         if let surface { ghostty_surface_free(surface) }
     }
 
@@ -166,6 +171,7 @@ public final class GhosttySurfaceView: NSView {
 
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        observeOcclusion(of: window)
         guard window != nil else { return }
         pushContentScale()
         pushSurfaceSize()
@@ -193,6 +199,36 @@ public final class GhosttySurfaceView: NSView {
         guard let surface else { return }
         let pixels = convertToBacking(bounds.size)
         ghostty_surface_set_size(surface, UInt32(max(pixels.width, 0)), UInt32(max(pixels.height, 0)))
+    }
+
+    // MARK: Visibility
+
+    /// Every session owns an NSWindow in a native tab group, so the window's
+    /// occlusion state is the tab's visibility. libghostty pauses rendering and
+    /// releases the surface's GPU resources while hidden.
+    private func observeOcclusion(of window: NSWindow?) {
+        if let occlusionObserver {
+            NotificationCenter.default.removeObserver(occlusionObserver)
+            self.occlusionObserver = nil
+        }
+        guard let window else {
+            setVisible(false)
+            return
+        }
+        occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
+        ) { [weak self] notification in
+            guard let window = notification.object as? NSWindow else { return }
+            let visible = window.occlusionState.contains(.visible)
+            MainActor.assumeIsolated { self?.setVisible(visible) }
+        }
+        setVisible(window.occlusionState.contains(.visible))
+    }
+
+    private func setVisible(_ visible: Bool) {
+        guard self.visible != visible, let surface else { return }
+        self.visible = visible
+        ghostty_surface_set_occlusion(surface, visible)
     }
 
     // MARK: Focus

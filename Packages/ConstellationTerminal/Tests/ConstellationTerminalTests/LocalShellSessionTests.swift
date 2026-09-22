@@ -34,11 +34,18 @@ struct LocalShellSessionTests {
         return window
     }
 
+    /// Pumps NSApplication events rather than only the run loop: window
+    /// occlusion updates arrive as app events and never fire otherwise.
     private func waitUntil(_ timeout: Duration = .seconds(10), _ condition: () -> Bool) -> Bool {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
             if condition() { return true }
-            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+            let app = NSApplication.shared
+            if let event = app.nextEvent(
+                matching: .any, until: Date(timeIntervalSinceNow: 0.05), inMode: .default, dequeue: true
+            ) {
+                app.sendEvent(event)
+            }
         }
         return condition()
     }
@@ -98,6 +105,24 @@ struct LocalShellSessionTests {
         let after = session.surfaceView.gridSize
         #expect(after.columns > before.columns)
         #expect(after.rows > before.rows)
+    }
+
+    /// Occlusion follows the hosting window, and the surface keeps working
+    /// after libghostty releases and rebuilds its GPU resources.
+    @Test func hidingTheWindowOccludesTheSurface() throws {
+        let session = try Self.runtime().makeSession(command: TerminalCommand(executable: "/bin/cat"))
+        let window = host(session)
+        defer { session.close(); window.close() }
+        let view = session.surfaceView
+
+        #expect(waitUntil { view.visible })
+        window.orderOut(nil)
+        #expect(waitUntil { !view.visible })
+        window.orderFrontRegardless()
+        #expect(waitUntil { view.visible })
+
+        session.send(.text("constellation-after-occlusion\n"))
+        #expect(waitUntil { session.visibleText().contains("constellation-after-occlusion") })
     }
 
     /// Drives libghostty's clipboard read callback end to end. Single-line text
