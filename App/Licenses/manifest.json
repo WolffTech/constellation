@@ -9,7 +9,7 @@
   },
   {
     "name": "FreeRDP and WinPR",
-    "version": "3.30.0",
+    "version": "3.31.1",
     "license": "Apache-2.0",
     "url": "https://github.com/FreeRDP/FreeRDP",
     "summary": "RDP protocol, codecs and channels behind RDP sessions.",

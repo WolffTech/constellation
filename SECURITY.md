@@ -18,7 +18,7 @@ machines in the app's own process:
 | Component | Pinned at | Used for | Watch |
 | --- | --- | --- | --- |
 | libghostty (`Vendor/ghostty` submodule) | commit `da5ddcb0` (2026-08-22), built with Zig 0.16.0 | terminal emulation for SSH tabs | https://github.com/ghostty-org/ghostty/releases, https://github.com/ghostty-org/ghostty/security |
-| FreeRDP + WinPR (`Vendor/freerdp` submodule) | tag `3.30.0` | RDP sessions | https://github.com/FreeRDP/FreeRDP/security/advisories, https://github.com/FreeRDP/FreeRDP/releases |
+| FreeRDP + WinPR (`Vendor/freerdp` submodule) | tag `3.31.1` | RDP sessions | https://github.com/FreeRDP/FreeRDP/security/advisories, https://github.com/FreeRDP/FreeRDP/releases |
 | OpenSSL (source build, linked statically into FreeRDPKit) | LTS release `3.5.8`, archive SHA-256 pinned in `Scripts/build-openssl.sh` | TLS and NLA for RDP | https://openssl-library.org/news/vulnerabilities/ |
 | cJSON (source build, linked statically into FreeRDPKit) | release `1.7.19`, archive SHA-256 pinned in `Scripts/build-cjson.sh` | JSON from Entra ID and the Azure Virtual Desktop gateway | https://github.com/DaveGamble/cJSON/releases, https://github.com/DaveGamble/cJSON/security |
 | RoyalVNCKit (Swift package) | revision `92d4427c` (tag 1.1.0) | VNC sessions | https://github.com/royalapplications/royalvnc/releases |
