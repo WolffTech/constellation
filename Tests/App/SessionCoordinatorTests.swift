@@ -220,6 +220,93 @@ struct SessionCoordinatorTests {
         #expect(coordinator.selectedSessionID == ids[0])
     }
 
+    @Test func poppedOutTabsScopeTabShortcutsAndNewSessionsToTheirWindow() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let coordinator = SessionCoordinator(
+            library: library, prober: StubProber(), driver: StubSSHDriver(),
+            localDriver: StubLocalTerminalDriver())
+        let one = await coordinator.openQuickConnect(QuickConnectTarget(host: "one"))
+        let two = await coordinator.openQuickConnect(QuickConnectTarget(host: "two"))
+        let three = await coordinator.openQuickConnect(QuickConnectTarget(host: "three"))
+        #expect(coordinator.windowLayout == [[one, two, three]])
+
+        coordinator.moveToNewWindow(sessionID: two)
+        #expect(coordinator.windowLayout == [[one, three], [two]])
+        #expect(coordinator.selectedSessionID == two)
+        #expect(coordinator.activeWindowSessions.map(\.id) == [two])
+        coordinator.cycleSelection()
+        #expect(coordinator.selectedSessionID == two)
+        coordinator.select(number: 2)
+        #expect(coordinator.selectedSessionID == two)
+
+        coordinator.select(one)
+        #expect(coordinator.activeWindowSessions.map(\.id) == [one, three])
+        coordinator.cycleSelection()
+        #expect(coordinator.selectedSessionID == three)
+        coordinator.cycleSelection()
+        #expect(coordinator.selectedSessionID == one)
+        coordinator.select(number: 2)
+        #expect(coordinator.selectedSessionID == three)
+
+        // Machine details showing keeps the last window active for new tabs.
+        coordinator.select(nil)
+        let local = coordinator.openLocalTerminal()
+        #expect(coordinator.windowLayout == [[one, three, local], [two]])
+
+        // Merging gathers every tab behind the active window's own.
+        coordinator.select(two)
+        coordinator.mergeAllWindows()
+        #expect(coordinator.windowLayout == [[two, one, three, local]])
+        #expect(coordinator.selectedSessionID == two)
+    }
+
+    @Test func nativeDragsBetweenWindowsUpdateTheLayout() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let coordinator = SessionCoordinator(
+            library: library, prober: StubProber(), driver: StubSSHDriver(),
+            localDriver: StubLocalTerminalDriver())
+        let one = await coordinator.openQuickConnect(QuickConnectTarget(host: "one"))
+        let two = await coordinator.openQuickConnect(QuickConnectTarget(host: "two"))
+        let three = await coordinator.openQuickConnect(QuickConnectTarget(host: "three"))
+        let original = coordinator.activeWindowID
+
+        // AppKit can briefly report incomplete membership while moving a tab.
+        coordinator.applyWindowLayout([[one], [two]])
+        #expect(coordinator.windowLayout == [[one, two, three]])
+
+        coordinator.applyWindowLayout([[three], [one, two]])
+        #expect(coordinator.windowLayout == [[three], [one, two]])
+        #expect(coordinator.sessions.map(\.id) == [three, one, two])
+        #expect(coordinator.selectedSessionID == three)
+        #expect(coordinator.activeWindowID == original)
+        #expect(coordinator.windowIDs.count == 2)
+
+        coordinator.reorderSessions([two, one])
+        #expect(coordinator.windowLayout == [[three], [two, one]])
+
+        coordinator.applyWindowLayout([[two, one, three]])
+        #expect(coordinator.windowIDs.count == 1)
+        #expect(coordinator.activeWindowSessions.map(\.id) == [two, one, three])
+    }
+
+    @Test func closingTheSelectedTabSelectsItsWindowNeighbour() async throws {
+        let library = try GRDBMachineLibrary.inMemory()
+        let coordinator = SessionCoordinator(
+            library: library, prober: StubProber(), driver: StubSSHDriver(),
+            localDriver: StubLocalTerminalDriver())
+        let one = await coordinator.openQuickConnect(QuickConnectTarget(host: "one"))
+        let two = await coordinator.openQuickConnect(QuickConnectTarget(host: "two"))
+        let three = await coordinator.openQuickConnect(QuickConnectTarget(host: "three"))
+        coordinator.moveToNewWindow(sessionID: two)
+        coordinator.select(one)
+
+        coordinator.close(sessionID: one)
+        #expect(coordinator.selectedSessionID == three)
+        coordinator.close(sessionID: three)
+        #expect(coordinator.selectedSessionID == two)
+        #expect(coordinator.activeWindowSessions.map(\.id) == [two])
+    }
+
     @Test func backgroundTerminalBellNeedsAttentionUntilSelected() async throws {
         let library = try GRDBMachineLibrary.inMemory()
         let localDriver = StubLocalTerminalDriver()
@@ -245,6 +332,7 @@ struct SessionCoordinatorTests {
     @Test func nativeTabStatusTracksSessionLifecycle() {
         var summary = SessionSummary(
             id: SessionID(),
+            windowID: SessionWindowID(),
             target: .local,
             title: "This Mac",
             machineName: "This Mac",

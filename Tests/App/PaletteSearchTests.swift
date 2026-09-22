@@ -28,7 +28,7 @@ struct PaletteSearchTests {
             ],
             profiles: [webSSH, webRDP, buildSSH])
         buildSession = SessionSummary(
-            id: SessionID(), target: .saved(machineID: build.id, profileID: buildSSH.id), title: "build box",
+            id: SessionID(), windowID: SessionWindowID(), target: .saved(machineID: build.id, profileID: buildSSH.id), title: "build box",
             machineName: "build box", profileName: "SSH", state: .disconnected)
     }
 

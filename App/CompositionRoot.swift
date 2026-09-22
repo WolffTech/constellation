@@ -95,6 +95,8 @@ final class CompositionRoot {
         case .disconnect: if let sessions, let id = sessions.selectedSessionID { sessions.disconnect(sessionID: id) }
         case .nextTab: sessions?.cycleSelection()
         case .previousTab: sessions?.cycleSelection(reverse: true)
+        case .moveTabToNewWindow: if let sessions, let id = sessions.selectedSessionID { sessions.moveToNewWindow(sessionID: id) }
+        case .mergeAllWindows: sessions?.mergeAllWindows()
         case .findInSession: sessions?.performSearch()
         case .fitToWindow: setDisplayMode(.fit)
         case .actualSize: setDisplayMode(.actualSize)
@@ -116,6 +118,10 @@ final class CompositionRoot {
             sessions?.selectedSessionID != nil
         case .closeOtherSessions:
             (sessions?.sessions.count ?? 0) >= 2
+        case .moveTabToNewWindow:
+            (sessions?.activeWindowSessions.count ?? 0) >= 2 && sessions?.selectedSessionID != nil
+        case .mergeAllWindows:
+            (sessions?.windowIDs.count ?? 0) >= 2
         case .reconnect:
             sessions?.selectedSession?.state.hasLiveProcess == false
         case .disconnect:

@@ -44,6 +44,9 @@ enum LiveSession {
 final class SessionCoordinator {
     private(set) var sessions: [SessionSummary] = []
     private(set) var selectedSessionID: SessionID?
+    /// The window new tabs open in and tab shortcuts act on: the window of the
+    /// last selected session, which stays put while machine details are showing.
+    private(set) var activeWindowID = SessionWindowID()
     var pendingClose: CloseRequest?
     var searchSessionID: SessionID?
     var presentedError: PresentedError?
@@ -83,6 +86,26 @@ final class SessionCoordinator {
 
     var needsQuitConfirmation: Bool {
         sessions.contains { $0.state.hasLiveProcess }
+    }
+
+    /// Tabs of the active window in tab order.
+    var activeWindowSessions: [SessionSummary] {
+        sessions(in: activeWindowID)
+    }
+
+    /// Window IDs in the order their first tab appears, which is the order windows are created in.
+    var windowIDs: [SessionWindowID] {
+        var seen = Set<SessionWindowID>()
+        return sessions.map(\.windowID).filter { seen.insert($0).inserted }
+    }
+
+    /// Tab order of every window, in window order.
+    var windowLayout: [[SessionID]] {
+        windowIDs.map { sessions(in: $0).map(\.id) }
+    }
+
+    func sessions(in windowID: SessionWindowID) -> [SessionSummary] {
+        sessions.filter { $0.windowID == windowID }
     }
 
     func terminal(for id: SessionID) -> (any TerminalSession)? {
@@ -139,6 +162,7 @@ final class SessionCoordinator {
         let id = SessionID()
         sessions.append(SessionSummary(
             id: id,
+            windowID: activeWindowID,
             target: .saved(machineID: machine.id, profileID: profile.id),
             title: machine.name,
             machineName: machine.name,
@@ -168,6 +192,7 @@ final class SessionCoordinator {
         let id = SessionID()
         sessions.append(SessionSummary(
             id: id,
+            windowID: activeWindowID,
             target: .quick(target),
             title: target.displayName,
             machineName: nil,
@@ -183,6 +208,7 @@ final class SessionCoordinator {
         let id = SessionID()
         sessions.append(SessionSummary(
             id: id,
+            windowID: activeWindowID,
             target: .local,
             title: "This Mac",
             machineName: "This Mac",
@@ -241,9 +267,15 @@ final class SessionCoordinator {
         reportedExitStatuses.removeValue(forKey: sessionID)
         pendingConnectionFacts.removeValue(forKey: sessionID)
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
-        sessions.remove(at: index)
+        let closing = sessions.remove(at: index)
         if selectedSessionID == sessionID {
-            selectedSessionID = sessions.indices.contains(index) ? sessions[index].id : sessions.last?.id
+            // Prefer the neighbouring tab of the same window, as a native tab close does.
+            let siblings = sessions(in: closing.windowID)
+            let position = sessions[..<index].count { $0.windowID == closing.windowID }
+            let next = siblings.indices.contains(position) ? siblings[position] : siblings.last
+                ?? (sessions.indices.contains(index) ? sessions[index] : sessions.last)
+            selectedSessionID = next?.id
+            if let next { activeWindowID = next.windowID }
         }
         if searchSessionID == sessionID { searchSessionID = nil }
         scheduleWorkspaceSave()
@@ -295,29 +327,94 @@ final class SessionCoordinator {
     }
 
     func select(_ sessionID: SessionID?) {
-        guard sessionID == nil || sessions.contains(where: { $0.id == sessionID }) else { return }
-        if let sessionID {
-            update(sessionID) { $0.needsAttention = false }
+        guard let session = sessions.first(where: { $0.id == sessionID }) else {
+            if sessionID == nil, selectedSessionID != nil {
+                selectedSessionID = nil
+                scheduleWorkspaceSave()
+            }
+            return
         }
-        guard selectedSessionID != sessionID else { return }
-        selectedSessionID = sessionID
+        update(session.id) { $0.needsAttention = false }
+        activeWindowID = session.windowID
+        guard selectedSessionID != session.id else { return }
+        selectedSessionID = session.id
         scheduleWorkspaceSave()
     }
 
+    /// Selects the numbered tab of the active window.
     func select(number: Int) {
-        guard (1...9).contains(number), sessions.indices.contains(number - 1) else { return }
-        select(sessions[number - 1].id)
+        let tabs = activeWindowSessions
+        guard (1...9).contains(number), tabs.indices.contains(number - 1) else { return }
+        select(tabs[number - 1].id)
     }
 
+    /// Cycles through the tabs of the active window.
     func cycleSelection(reverse: Bool = false) {
-        guard !sessions.isEmpty else { return }
+        let tabs = activeWindowSessions
+        guard !tabs.isEmpty else { return }
         guard let selectedSessionID,
-              let index = sessions.firstIndex(where: { $0.id == selectedSessionID }) else {
-            select(sessions[0].id)
+              let index = tabs.firstIndex(where: { $0.id == selectedSessionID }) else {
+            select(tabs[0].id)
             return
         }
-        let offset = reverse ? sessions.count - 1 : 1
-        select(sessions[(index + offset) % sessions.count].id)
+        let offset = reverse ? tabs.count - 1 : 1
+        select(tabs[(index + offset) % tabs.count].id)
+    }
+
+    /// Pops the tab out into a window of its own and selects it there.
+    func moveToNewWindow(sessionID: SessionID) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        let windowID = SessionWindowID()
+        sessions[index].windowID = windowID
+        // Windows appear in first-tab order, so the newest one goes last.
+        sessions.append(sessions.remove(at: index))
+        activeWindowID = windowID
+        select(sessionID)
+        scheduleWorkspaceSave()
+    }
+
+    /// Gathers every tab into the active window, after that window's own tabs.
+    func mergeAllWindows() {
+        guard windowIDs.count > 1 else { return }
+        let windowID = activeWindowID
+        sessions = sessions.filter { $0.windowID == windowID } + sessions.filter { $0.windowID != windowID }.map {
+            var session = $0
+            session.windowID = windowID
+            return session
+        }
+        scheduleWorkspaceSave()
+    }
+
+    /// Accepts the windows and tab order AppKit reports after the user drags
+    /// native tabs, between windows or out into a window of their own.
+    func applyWindowLayout(_ layout: [[SessionID]]) {
+        let currentIDs = sessions.map(\.id)
+        let orderedIDs = layout.flatMap { $0 }
+        guard orderedIDs.count == currentIDs.count, Set(orderedIDs) == Set(currentIDs) else { return }
+        let summaries = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        let activeTabIDs = Set(activeWindowSessions.map(\.id))
+        var claimed = Set<SessionWindowID>()
+        var reordered: [SessionSummary] = []
+        for tabIDs in layout {
+            // A window ID stays with the first group that still holds one of its
+            // tabs; the other groups are new windows. IDs are not persisted, so
+            // which side keeps it only matters until the next selection.
+            let tabs = tabIDs.compactMap { summaries[$0] }
+            let windowID = tabs.first { !claimed.contains($0.windowID) }?.windowID ?? SessionWindowID()
+            claimed.insert(windowID)
+            reordered += tabs.map {
+                var session = $0
+                session.windowID = windowID
+                return session
+            }
+        }
+        guard reordered != sessions else { return }
+        sessions = reordered
+        // The active window follows the selection, or its former tabs while nothing is selected.
+        if let windowID = selectedSession?.windowID ?? sessions.first(where: { activeTabIDs.contains($0.id) })?.windowID {
+            activeWindowID = windowID
+        }
+        scheduleWorkspaceSave()
     }
 
     func move(sessionID: SessionID, before destinationID: SessionID) {
@@ -330,15 +427,12 @@ final class SessionCoordinator {
         scheduleWorkspaceSave()
     }
 
-    /// Accepts the order reported by AppKit after the user drags native tabs.
+    /// Accepts the order reported by AppKit after the user drags native tabs
+    /// within their window.
     func reorderSessions(_ orderedIDs: [SessionID]) {
-        let currentIDs = sessions.map(\.id)
-        guard orderedIDs != currentIDs,
-              orderedIDs.count == currentIDs.count,
-              Set(orderedIDs) == Set(currentIDs) else { return }
-        let summaries = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
-        sessions = orderedIDs.compactMap { summaries[$0] }
-        scheduleWorkspaceSave()
+        applyWindowLayout(windowLayout.map { tabIDs in
+            Set(tabIDs) == Set(orderedIDs) ? orderedIDs : tabIDs
+        })
     }
 
     func setDisplayMode(_ mode: RemoteDesktopDisplayMode, for sessionID: SessionID) {
@@ -353,6 +447,7 @@ final class SessionCoordinator {
             case .local:
                 return SessionSummary(
                     id: tab.id,
+                    windowID: activeWindowID,
                     target: .local,
                     title: tab.title.isEmpty ? "This Mac" : tab.title,
                     machineName: "This Mac",
@@ -364,6 +459,7 @@ final class SessionCoordinator {
                       let profile = snapshot.profile(profileID) else { return nil }
                 return SessionSummary(
                     id: tab.id,
+                    windowID: activeWindowID,
                     target: .saved(machineID: machine.id, profileID: profile.id),
                     title: tab.title.isEmpty ? machine.name : tab.title,
                     machineName: machine.name,
