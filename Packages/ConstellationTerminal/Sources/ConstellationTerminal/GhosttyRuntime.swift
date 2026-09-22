@@ -44,16 +44,17 @@ public final class GhosttyRuntime {
                 return runtime.handle(action: action, target: target)
             }
         }
-        runtime.read_clipboard_cb = { userdata, location, state in
+        runtime.read_clipboard_cb = { userdata, location, state, mimes, count, list in
             MainActor.assumeIsolated {
                 GhosttySurfaceView.from(userdata: userdata)?
-                    .readClipboard(location: location, state: state) ?? false
+                    .readClipboard(location: location, state: state, mimes: mimes, count: count, list: list)
+                    ?? GHOSTTY_CLIPBOARD_READ_UNSUPPORTED
             }
         }
-        runtime.confirm_read_clipboard_cb = { userdata, string, state, request in
+        runtime.confirm_read_clipboard_cb = { userdata, confirm, state, request in
             MainActor.assumeIsolated {
                 GhosttySurfaceView.from(userdata: userdata)?
-                    .confirmReadClipboard(string: string, state: state, request: request)
+                    .confirmReadClipboard(confirm, state: state, request: request)
             }
         }
         runtime.write_clipboard_cb = { userdata, location, content, count, confirm in
