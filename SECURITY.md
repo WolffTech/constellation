@@ -23,7 +23,7 @@ machines in the app's own process:
 | cJSON (source build, linked statically into FreeRDPKit) | release `1.7.19`, archive SHA-256 pinned in `Scripts/build-cjson.sh` | JSON from Entra ID and the Azure Virtual Desktop gateway | https://github.com/DaveGamble/cJSON/releases, https://github.com/DaveGamble/cJSON/security |
 | RoyalVNCKit (Swift package) | revision `92d4427c` (tag 1.1.0) | VNC sessions | https://github.com/royalapplications/royalvnc/releases |
 | GRDB (Swift package) | exact `7.11.1` | SQLite storage | https://github.com/groue/GRDB.swift/releases |
-| Sparkle (prebuilt framework, Swift package) | exact `2.9.6` | in-app updates | https://github.com/sparkle-project/Sparkle/releases, https://github.com/sparkle-project/Sparkle/security |
+| Sparkle (prebuilt framework, Swift package) | exact `2.10.0` | in-app updates | https://github.com/sparkle-project/Sparkle/releases, https://github.com/sparkle-project/Sparkle/security |
 | OpenSSH | the system `/usr/bin/ssh` | SSH transport | macOS security updates |
 
 Passwords and passphrases are stored only in the login Keychain and are never

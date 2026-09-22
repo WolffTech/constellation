@@ -92,7 +92,7 @@ SQLite access for the machine library and the certificate trust store.
 In-app updates, embedded as the prebuilt framework the Sparkle project publishes.
 
 - Upstream: [https://github.com/sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle)
-- Version: 2.9.6
+- Version: 2.10.0
 - License: MIT; bundled components (bspatch, ed25519, SHA-1) under compatible permissive licenses
 - License text: [`sparkle.txt`](App/Licenses/sparkle.txt)
 
