@@ -20,7 +20,7 @@ libghostty renders the terminal in SSH tabs. The AppKit surface, keyboard and te
 RDP protocol, codecs and channels behind RDP sessions.
 
 - Upstream: [https://github.com/FreeRDP/FreeRDP](https://github.com/FreeRDP/FreeRDP)
-- Version: 3.30.0
+- Version: 3.31.1
 - License: Apache-2.0
 - License text: [`freerdp.txt`](App/Licenses/freerdp.txt)
 
