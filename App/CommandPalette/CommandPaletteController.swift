@@ -20,6 +20,10 @@ enum PaletteMetrics {
     static let headerHeight: CGFloat = 24
     static let noticeHeight: CGFloat = 36
     static let listPadding: CGFloat = 6
+    /// Transparent room around the glass for its SwiftUI shadow. The window
+    /// shadow can't be used: it is cut from the panel's rectangle, not the
+    /// rounded glass.
+    static let shadowMargin: CGFloat = 32
     static let maxListHeight: CGFloat = 8 * rowHeight + 2 * headerHeight + 2 * listPadding
 
     static func listHeight(for items: [PaletteItem], connecting: Bool = false) -> CGFloat {
@@ -128,21 +132,19 @@ final class CommandPaletteController {
         let anchor = NSApp.mainWindow?.frame ?? NSScreen.main?.visibleFrame ?? .zero
         let top = anchor.maxY - anchor.height * 0.18
         let x = anchor.midX - PaletteMetrics.width / 2
-        panel.setFrame(NSRect(x: x, y: top - height, width: PaletteMetrics.width, height: height), display: true)
-        // The shadow is cut from the content's alpha; recompute it once the
-        // glass has drawn or a rectangular ghost shows at the rounded corners.
-        DispatchQueue.main.async { panel.invalidateShadow() }
+        let frame = NSRect(x: x, y: top - height, width: PaletteMetrics.width, height: height)
+        panel.setFrame(frame.insetBy(dx: -PaletteMetrics.shadowMargin, dy: -PaletteMetrics.shadowMargin), display: true)
     }
 
     private func makePanel(shortcuts: ShortcutSettingsStore) -> CommandPalettePanel {
         let panel = CommandPalettePanel(
-            contentRect: NSRect(x: 0, y: 0, width: PaletteMetrics.width, height: PaletteMetrics.fieldHeight),
+            contentRect: .zero,
             styleMask: [.borderless], backing: .buffered, defer: false)
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.hidesOnDeactivate = true
         panel.animationBehavior = .none
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
