@@ -7,8 +7,9 @@ import Foundation
 /// references; recent sessions, trust decisions and workspace state are
 /// deliberately absent.
 public struct MachineExportDocument: Hashable, Sendable, Codable {
-    /// 2 added groups; version 1 documents still decode.
-    public static let currentVersion = 2
+    /// 2 added groups; 3 added RDP gateways, including Azure Virtual
+    /// Desktop. Older documents still decode.
+    public static let currentVersion = 3
 
     public var version: Int
     public var machines: [Machine]
@@ -56,8 +57,13 @@ public enum MachineExportError: Error, Hashable, Sendable, LocalizedError {
 }
 
 public enum MachineExport {
+    /// Writes the oldest format that holds the library. Builds that predate
+    /// gateways would drop them or fail to decode, so only a library with a
+    /// gateway needs version 3; those builds then refuse it by version.
     public static func document(from snapshot: MachineLibrarySnapshot) -> MachineExportDocument {
-        MachineExportDocument(
+        let hasGateway = snapshot.profiles.contains { if case .rdp(let p) = $0 { p.gateway != nil } else { false } }
+        return MachineExportDocument(
+            version: hasGateway ? 3 : 2,
             machines: snapshot.machines,
             groups: snapshot.groups,
             addresses: snapshot.addresses.sorted { ($0.machineID.description, $0.priority) < ($1.machineID.description, $1.priority) },
@@ -79,9 +85,11 @@ public enum MachineExport {
     }
 
     /// Upserts everything in the document. Imported profiles carry no
-    /// credential. A group whose name matches one in `snapshot` (ignoring
-    /// case) is merged into it rather than duplicated; the rest are appended
-    /// in document order. Machines keep their document order within groups.
+    /// credential of their own; one that replaces a profile in `snapshot`
+    /// keeps that profile's saved secrets. A group whose name matches one in
+    /// `snapshot` (ignoring case) is merged into it rather than duplicated;
+    /// the rest are appended in document order. Machines keep their document
+    /// order within groups.
     public static func importChange(for document: MachineExportDocument, into snapshot: MachineLibrarySnapshot = .empty) -> MachineLibraryChange {
         var remapped: [GroupID: GroupID] = [:]
         var groupChanges: [MachineLibraryChange] = []
@@ -107,6 +115,9 @@ public enum MachineExport {
             groupChanges
                 + machines.map { .upsertMachine($0) }
                 + document.addresses.map { .upsertAddress($0) }
-                + document.profiles.map { .upsertProfile($0.withoutCredential()) })
+                + document.profiles.map { profile in
+                    let imported = profile.withoutCredential()
+                    return .upsertProfile(snapshot.profile(profile.id).map(imported.keepingCredentials(of:)) ?? imported)
+                })
     }
 }
