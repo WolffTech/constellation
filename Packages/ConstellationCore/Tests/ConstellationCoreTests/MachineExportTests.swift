@@ -140,6 +140,20 @@ struct MachineExportTests {
         #expect(machines.map(\.groupID) == [myLab.id, theirNew.id, nil, myLab.id])
     }
 
+    /// Builds that predate gateways must refuse these libraries by version
+    /// rather than drop the gateway or fail to decode it.
+    @Test func gatewaysNeedVersionThreeAndRoundTrip() throws {
+        let machine = Machine(name: "avd")
+        let resource = AVDResource(tenantID: "tenant", loadBalanceInfo: "lb", application: "desktop", desktopSignIn: .passwordInsteadOfEntraID)
+        let gateway = RDPGateway(host: "rdgateway.wvd.microsoft.com", credentials: .azureVirtualDesktop(resource))
+        let profile = ConnectionProfile.rdp(RDPProfile(machineID: machine.id, gateway: gateway))
+        let snapshot = MachineLibrarySnapshot(machines: [machine], profiles: [profile])
+
+        let document = try MachineExport.decode(try MachineExport.encode(MachineExport.document(from: snapshot)))
+        #expect(document.version == 3)
+        #expect(document.profiles == [profile])
+    }
+
     @Test func decodesVersionOneDocuments() throws {
         let json = """
         {"version":1,"machines":[{"id":"\(MachineID())","name":"old","notes":"","tags":[],"isFavorite":false}],"addresses":[],"profiles":[]}
