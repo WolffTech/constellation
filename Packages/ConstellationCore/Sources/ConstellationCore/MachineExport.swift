@@ -79,9 +79,11 @@ public enum MachineExport {
     }
 
     /// Upserts everything in the document. Imported profiles carry no
-    /// credential. A group whose name matches one in `snapshot` (ignoring
-    /// case) is merged into it rather than duplicated; the rest are appended
-    /// in document order. Machines keep their document order within groups.
+    /// credential of their own; one that replaces a profile in `snapshot`
+    /// keeps that profile's saved secrets. A group whose name matches one in
+    /// `snapshot` (ignoring case) is merged into it rather than duplicated;
+    /// the rest are appended in document order. Machines keep their document
+    /// order within groups.
     public static func importChange(for document: MachineExportDocument, into snapshot: MachineLibrarySnapshot = .empty) -> MachineLibraryChange {
         var remapped: [GroupID: GroupID] = [:]
         var groupChanges: [MachineLibraryChange] = []
@@ -107,6 +109,9 @@ public enum MachineExport {
             groupChanges
                 + machines.map { .upsertMachine($0) }
                 + document.addresses.map { .upsertAddress($0) }
-                + document.profiles.map { .upsertProfile($0.withoutCredential()) })
+                + document.profiles.map { profile in
+                    let imported = profile.withoutCredential()
+                    return .upsertProfile(snapshot.profile(profile.id).map(imported.keepingCredentials(of:)) ?? imported)
+                })
     }
 }

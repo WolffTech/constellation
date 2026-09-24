@@ -340,4 +340,27 @@ public enum ConnectionProfile: Identifiable, Hashable, Sendable, Codable {
         case .appleScreenSharing: return self
         }
     }
+
+    /// The same profile holding `saved`'s Keychain references, so importing
+    /// over a saved profile keeps its passwords. A reference is kept only
+    /// where the secret still fits: the same SSH authentication, or a gateway
+    /// that still has its own account.
+    public func keepingCredentials(of saved: ConnectionProfile) -> ConnectionProfile {
+        switch (self, saved) {
+        case (.ssh(var p), .ssh(let s)) where p.authentication == s.authentication:
+            p.credentialID = s.credentialID
+            return .ssh(p)
+        case (.vnc(var p), .vnc(let s)):
+            p.credentialID = s.credentialID
+            return .vnc(p)
+        case (.rdp(var p), .rdp(let s)):
+            p.credentialID = s.credentialID
+            if case .separate(let username, let domain, _) = p.gateway?.credentials, let id = s.gateway?.credentialID {
+                p.gateway?.credentials = .separate(username: username, domain: domain, credentialID: id)
+            }
+            return .rdp(p)
+        default:
+            return self
+        }
+    }
 }

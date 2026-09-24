@@ -62,6 +62,46 @@ struct MachineExportTests {
         #expect(changes.count == 3)
     }
 
+    @Test func reimportKeepsSavedCredentials() throws {
+        let machine = Machine(name: "win")
+        let password = CredentialReference(label: "desktop", kind: .password)
+        let gatewayPassword = CredentialReference(label: "gateway", kind: .password)
+        let gateway = RDPGateway(host: "gw.example.com", credentials: .separate(username: "dmz-nick", domain: "DMZ", credentialID: gatewayPassword.id))
+        let rdp = ConnectionProfile.rdp(RDPProfile(machineID: machine.id, username: "nick", credentialID: password.id, gateway: gateway))
+        let (sshSnapshot, sshPassword) = sampleSnapshot()
+        let snapshot = MachineLibrarySnapshot(
+            machines: sshSnapshot.machines + [machine],
+            addresses: sshSnapshot.addresses,
+            profiles: sshSnapshot.profiles + [rdp],
+            credentials: sshSnapshot.credentials + [password, gatewayPassword])
+        let document = try MachineExport.decode(try MachineExport.encode(MachineExport.document(from: snapshot)))
+
+        guard case .batch(let changes) = MachineExport.importChange(for: document, into: snapshot) else {
+            Issue.record("expected a batch")
+            return
+        }
+        let profiles = changes.compactMap { if case .upsertProfile(let p) = $0 { p } else { nil } }
+        #expect(Set(profiles) == Set(snapshot.profiles))
+        #expect(Set(profiles.flatMap(\.credentialIDs)) == [sshPassword, password.id, gatewayPassword.id])
+    }
+
+    @Test func reimportDropsCredentialsThatNoLongerFit() {
+        let machineID = MachineID()
+        let passphrase = CredentialID()
+        let saved = ConnectionProfile.ssh(SSHProfile(machineID: machineID, authentication: .keyFile(path: "~/.ssh/old"), credentialID: passphrase))
+        guard case .ssh(var ssh) = saved else { return }
+        ssh.authentication = .keyFile(path: "~/.ssh/new")
+        #expect(ConnectionProfile.ssh(ssh).withoutCredential().keepingCredentials(of: saved).credentialIDs.isEmpty)
+
+        let gatewayPassword = CredentialID()
+        let rdp = RDPProfile(
+            machineID: machineID,
+            gateway: RDPGateway(host: "gw.example.com", credentials: .separate(username: nil, domain: nil, credentialID: gatewayPassword)))
+        var shared = rdp
+        shared.gateway?.credentials = .sameAsDesktop
+        #expect(ConnectionProfile.rdp(shared).keepingCredentials(of: .rdp(rdp)).credentialIDs.isEmpty)
+    }
+
     @Test func exportCarriesGroupsAndOrder() throws {
         let lab = MachineGroup(name: "Lab", position: 1)
         let work = MachineGroup(name: "Work", position: 0)
