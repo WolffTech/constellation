@@ -22,8 +22,11 @@ enum PaletteMetrics {
     static let listPadding: CGFloat = 6
     /// Transparent room around the glass for its SwiftUI shadow. The window
     /// shadow can't be used: it is cut from the panel's rectangle, not the
-    /// rounded glass.
-    static let shadowMargin: CGFloat = 32
+    /// rounded glass. The blur fades out about 2× its radius past the glass,
+    /// plus the offset; anything smaller clips it to a hard, square edge.
+    static let shadowRadius: CGFloat = 16
+    static let shadowY: CGFloat = 8
+    static let shadowMargin: CGFloat = 3 * shadowRadius + shadowY
     static let maxListHeight: CGFloat = 8 * rowHeight + 2 * headerHeight + 2 * listPadding
 
     static func listHeight(for items: [PaletteItem], connecting: Bool = false) -> CGFloat {

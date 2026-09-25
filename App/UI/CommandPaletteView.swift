@@ -43,7 +43,7 @@ struct CommandPaletteView: View {
         .frame(width: PaletteMetrics.width)
         .containerShape(PaletteMetrics.panelShape)
         .glassSurface(in: PaletteMetrics.panelShape)
-        .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
+        .shadow(color: .black.opacity(0.25), radius: PaletteMetrics.shadowRadius, y: PaletteMetrics.shadowY)
         .padding(PaletteMetrics.shadowMargin)
         .onAppear { fieldFocused = true }
         .onChange(of: controller.isPresented) { _, presented in
