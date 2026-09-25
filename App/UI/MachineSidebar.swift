@@ -64,6 +64,54 @@ private struct SectionRowChrome: ViewModifier {
     }
 }
 
+/// The header content alone; drag and drop wrap this so the drag image
+/// is not clipped by the chrome's negative padding.
+private struct SectionTitleText: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            // Inside the view, not row insets, so the whole row height takes drops.
+            .padding(.top, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A group header that collapses its machines on click, like Finder's sidebar
+/// sections. `isExpanded` is nil while the header can't collapse.
+private struct GroupHeaderTitle: View {
+    let title: String
+    let isExpanded: Binding<Bool>?
+    @State private var hovering = false
+
+    var body: some View {
+        if let isExpanded {
+            HStack(spacing: 4) {
+                SectionTitleText(title: title)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                    .padding(.top, 8)
+                    .padding(.trailing, 8)
+                    // Always visible when collapsed, so the hidden machines aren't a mystery.
+                    .opacity(hovering || !isExpanded.wrappedValue ? 1 : 0)
+            }
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .onTapGesture { isExpanded.wrappedValue.toggle() }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(isExpanded.wrappedValue ? "Expanded" : "Collapsed")
+            .accessibilityAction { isExpanded.wrappedValue.toggle() }
+        } else {
+            SectionTitleText(title: title)
+        }
+    }
+}
+
 struct MachineSidebar: View {
     let store: MachineStore
     let sessions: SessionCoordinator
@@ -235,18 +283,23 @@ struct MachineSidebar: View {
     /// Headers and machines as one flat list, so a single `onMove` covers
     /// reordering within a group and moving between groups. Empty groups
     /// stay visible as drop targets unless a search is narrowing the list.
+    /// A search shows matches in collapsed groups too.
     private var rows: [SidebarRow] {
         var rows: [SidebarRow] = []
+        func append(_ groupID: GroupID?, _ machines: [Machine]) {
+            rows.append(.header(groupID))
+            if isSearching || expansion.isExpanded(group: groupID) {
+                rows += machines.map { .machine($0.id) }
+            }
+        }
         for group in store.snapshot.groups {
             let machines = filtered.filter { $0.groupID == group.id }
             if machines.isEmpty && isSearching { continue }
-            rows.append(.header(group.id))
-            rows += machines.map { .machine($0.id) }
+            append(group.id, machines)
         }
         let ungrouped = filtered.filter { $0.groupID == nil }
         if !ungrouped.isEmpty {
-            rows.append(.header(nil))
-            rows += ungrouped.map { .machine($0.id) }
+            append(nil, ungrouped)
         }
         return rows
     }
@@ -295,8 +348,11 @@ struct MachineSidebar: View {
     private func groupHeader(_ groupID: GroupID?) -> some View {
         let group = groupID.flatMap(store.snapshot.group)
         let title = group?.name ?? (store.snapshot.groups.isEmpty ? "All" : "Other")
+        let isExpanded = Binding(
+            get: { expansion.isExpanded(group: groupID) },
+            set: { expansion.setExpanded($0, group: groupID) })
         let header = dropTarget(
-            sectionTitleText(title),
+            GroupHeaderTitle(title: title, isExpanded: isSearching ? nil : isExpanded),
             accepts: { item in
                 switch item {
                 case .machine: true
@@ -322,6 +378,10 @@ struct MachineSidebar: View {
         }
             .modifier(SectionRowChrome())
             .contextMenu {
+                if !isSearching {
+                    Button(isExpanded.wrappedValue ? "Collapse" : "Expand") { isExpanded.wrappedValue.toggle() }
+                    Divider()
+                }
                 if let group {
                     let index = store.snapshot.groups.firstIndex(of: group) ?? 0
                     Button("Rename…") { groupPrompt = .rename(group) }
@@ -356,18 +416,7 @@ struct MachineSidebar: View {
     }
 
     private func sectionTitle(_ title: String) -> some View {
-        sectionTitleText(title).modifier(SectionRowChrome())
-    }
-
-    /// The header content alone; drag and drop wrap this so the drag image
-    /// is not clipped by the chrome's negative padding.
-    private func sectionTitleText(_ title: String) -> some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            // Inside the view, not row insets, so the whole row height takes drops.
-            .padding(.top, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        SectionTitleText(title: title).modifier(SectionRowChrome())
     }
 
     private var localMachineRow: some View {
