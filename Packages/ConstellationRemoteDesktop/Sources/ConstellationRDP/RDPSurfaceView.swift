@@ -3,6 +3,7 @@
 
 import AppKit
 import CConstellationRDP
+import ConstellationRemoteDesktop
 import CoreGraphics
 import QuartzCore
 
@@ -29,6 +30,8 @@ final class RDPSurfaceView: NSView {
     private var stride = 0
     private let colorSpace = CGColorSpaceCreateDeviceRGB()
     private var previousModifiers: NSEvent.ModifierFlags = []
+    /// RDP measures wheel rotation in 1/120ths of a notch (WHEEL_DELTA).
+    private var wheel = ScrollWheelAccumulator(stepsPerNotch: 120)
     private var displayLink: CADisplayLink?
     private var needsSnapshot = false
     /// The cursor built from `cursorShape` at the scale it was last shown at.
@@ -220,10 +223,9 @@ final class RDPSurfaceView: NSView {
 
     override func scrollWheel(with event: NSEvent) {
         guard let point = remotePoint(event) else { return }
-        let vertical = Int(event.scrollingDeltaY.rounded())
-        let horizontal = Int(event.scrollingDeltaX.rounded())
-        if vertical != 0 { inputSink?(.scroll(delta: vertical, horizontal: false, x: point.x, y: point.y)) }
-        if horizontal != 0 { inputSink?(.scroll(delta: horizontal, horizontal: true, x: point.x, y: point.y)) }
+        let steps = wheel.steps(for: event)
+        if steps.y != 0 { inputSink?(.scroll(delta: steps.y, horizontal: false, x: point.x, y: point.y)) }
+        if steps.x != 0 { inputSink?(.scroll(delta: steps.x, horizontal: true, x: point.x, y: point.y)) }
     }
 
     // MARK: Keyboard
@@ -267,6 +269,7 @@ enum RDPPointerButton: Sendable {
 enum RDPInputEvent: Sendable {
     case pointer(button: RDPPointerButton, down: Bool, x: UInt16, y: UInt16)
     case pointerMove(x: UInt16, y: UInt16)
+    /// `delta` is in 1/120ths of a notch; positive scrolls up or right.
     case scroll(delta: Int, horizontal: Bool, x: UInt16, y: UInt16)
     case key(macKeyCode: UInt16, down: Bool)
 }
