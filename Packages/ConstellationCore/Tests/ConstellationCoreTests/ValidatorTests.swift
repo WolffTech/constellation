@@ -44,13 +44,17 @@ struct ValidatorTests {
         #expect(throws: Never.self) { try Validator.validate(profile(RDPGateway(host: "gw.example.com"))) }
     }
 
-    @Test func passwordProfilesNeedACredential() {
+    /// Imports carry no passwords; the profile saves and prompts on connect.
+    @Test func passwordProfilesWithoutACredentialAreFlaggedNotRejected() {
         let machine = Machine(name: "box")
         let profile = SSHProfile(machineID: machine.id, name: "Admin", authentication: .password)
-        #expect(throws: ValidationError.missingCredential(profile: "Admin")) { try Validator.validate(.ssh(profile)) }
-        var fixed = profile
-        fixed.credentialID = CredentialID()
-        #expect(throws: Never.self) { try Validator.validate(.ssh(fixed)) }
+        #expect(throws: Never.self) { try Validator.validate(.ssh(profile)) }
+        #expect(ConnectionProfile.ssh(profile).needsPassword)
+        var saved = profile
+        saved.credentialID = CredentialID()
+        #expect(!ConnectionProfile.ssh(saved).needsPassword)
+        #expect(!ConnectionProfile.ssh(SSHProfile(machineID: machine.id)).needsPassword)
+        #expect(!ConnectionProfile.rdp(RDPProfile(machineID: machine.id)).needsPassword)
     }
 
     @Test func keyFileProfilesNeedAPath() {

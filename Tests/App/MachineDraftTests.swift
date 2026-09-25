@@ -45,17 +45,20 @@ struct MachineDraftTests {
         #expect(draft.pendingSecrets[0].credentialID == credential?.id)
         #expect(draft.pendingSecrets[0].secret.withValue { $0 } == "hunter2")
 
-        // Clearing the field again means no secret: the password profile is invalid.
+        // Clearing the field again means no secret and no credential reference.
         draft.profiles[0].enteredSecret = ""
         #expect(draft.pendingSecrets.isEmpty)
-        #expect(throws: ValidationError.missingCredential(profile: "SSH")) { try draft.change() }
+        guard case .batch(let cleared) = try draft.change() else { return }
+        #expect(!cleared.contains { if case .upsertCredential = $0 { true } else { false } })
     }
 
-    @Test func passwordWithoutSecretIsRejectedWithAMessage() {
+    @Test func passwordWithoutSecretSavesAndNeedsAPassword() throws {
         var draft = MachineDraft(newMachine: "box")
         draft.addresses[0].host = "box.local"
         draft.profiles[0].authMode = .password
-        #expect(throws: ValidationError.missingCredential(profile: "SSH")) { try draft.change() }
+        guard case .batch(let changes) = try draft.change() else { return }
+        let profile = changes.compactMap { if case .upsertProfile(let p) = $0 { p } else { nil } }.first
+        #expect(profile?.needsPassword == true)
     }
 
     @Test func emptyHostIsRejected() {
