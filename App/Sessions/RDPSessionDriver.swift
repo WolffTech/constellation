@@ -36,6 +36,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
     private let vault: any CredentialVault
     private let trustStore: any TrustStore
     private let settings: @MainActor () -> RDPSettings
+    private let scrollSpeed: @MainActor () -> Double
     private let credentialPrompt: @MainActor (RDPCredentialPrompt) -> RDPCredentialEntry?
     private let certificatePrompt: @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision
     private let entraSignInPrompt: @MainActor @Sendable (RDPEntraSignInRequest, String) async -> String?
@@ -44,6 +45,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         vault: any CredentialVault,
         trustStore: any TrustStore,
         settings: @escaping @MainActor () -> RDPSettings = { .default },
+        scrollSpeed: @escaping @MainActor () -> Double = { 1 },
         credentialPrompt: @escaping @MainActor (RDPCredentialPrompt) -> RDPCredentialEntry? = RDPCredentialPrompter.ask,
         certificatePrompt: @escaping @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision = RDPCertificatePrompter.ask,
         entraSignInPrompt: @escaping @MainActor @Sendable (RDPEntraSignInRequest, String) async -> String? = RDPEntraSignInPrompter.ask
@@ -51,6 +53,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         self.vault = vault
         self.trustStore = trustStore
         self.settings = settings
+        self.scrollSpeed = scrollSpeed
         self.credentialPrompt = credentialPrompt
         self.certificatePrompt = certificatePrompt
         self.entraSignInPrompt = entraSignInPrompt
@@ -122,7 +125,8 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
                     let entered = entry.password ?? password
                 else { return nil }
                 return RDPDesktopCredentials(username: entry.username, domain: entry.domain.isEmpty ? nil : entry.domain, password: entered)
-            })
+            },
+            scrollSpeed: scrollSpeed)
         session.displayMode = settings.defaultDisplayMode
         return session
     }

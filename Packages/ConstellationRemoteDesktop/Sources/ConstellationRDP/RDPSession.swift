@@ -68,7 +68,8 @@ public final class RDPSession: RemoteDesktopSession {
         gatewayPassword: RDPPasswordProvider? = nil,
         verifyCertificate: @escaping RDPCertificateVerifier,
         entraSignIn: RDPEntraSignIn? = nil,
-        desktopCredentials: RDPDesktopCredentialsProvider? = nil
+        desktopCredentials: RDPDesktopCredentialsProvider? = nil,
+        scrollSpeed: @escaping @MainActor () -> Double = { 1 }
     ) {
         self.configuration = configuration
         self.passwordProvider = password
@@ -80,6 +81,7 @@ public final class RDPSession: RemoteDesktopSession {
         host = RDPHostView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
         view = host
         surface.inputSink = { [weak self] event in self?.handle(input: event) }
+        surface.scrollSpeed = scrollSpeed
         if configuration.dynamicResolution {
             host.onFitSizeChanged = { [weak self] size in self?.scheduleResolutionRequest(size) }
         }

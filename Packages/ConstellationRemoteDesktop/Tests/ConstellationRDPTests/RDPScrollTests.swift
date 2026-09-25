@@ -19,6 +19,19 @@ struct RDPScrollTests {
         #expect(wheel.steps(deltaX: 0, deltaY: 8, isPrecise: true) == (0, 1))
     }
 
+    @Test func speedScalesTheDistanceAndCarriesFractions() {
+        var wheel = ScrollWheelAccumulator(stepsPerNotch: 1)
+        #expect(wheel.steps(deltaX: 0, deltaY: 1, isPrecise: false, speed: 2) == (0, 2))
+        #expect(wheel.steps(deltaX: 0, deltaY: 1, isPrecise: false, speed: 0.5) == (0, 0))
+        #expect(wheel.steps(deltaX: 0, deltaY: 1, isPrecise: false, speed: 0.5) == (0, 1))
+    }
+
+    @Test func speedIsClampedToTheSupportedRange() {
+        var wheel = ScrollWheelAccumulator(stepsPerNotch: 120)
+        #expect(wheel.steps(deltaX: 0, deltaY: 1, isPrecise: false, speed: 100) == (0, 480))
+        #expect(wheel.steps(deltaX: 0, deltaY: 1, isPrecise: false, speed: 0) == (0, 30))
+    }
+
     @Test func horizontalDeltaIsFlippedToScrollRight() {
         // AppKit's positive deltaX scrolls left; wheels use positive for right.
         var wheel = ScrollWheelAccumulator(stepsPerNotch: 1)

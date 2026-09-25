@@ -11,6 +11,8 @@ public struct ScrollWheelAccumulator: Sendable {
     /// Trackpad points per notch. macOS scrolls about 10 points per line and
     /// reports mouse wheels in lines, so one line maps to one notch.
     static let pointsPerNotch: CGFloat = 10
+    /// Speeds the user can pick; others are clamped into it.
+    public static let speedRange: ClosedRange<Double> = 0.25...4
 
     public let stepsPerNotch: Int
     private var pendingX: CGFloat = 0
@@ -21,15 +23,17 @@ public struct ScrollWheelAccumulator: Sendable {
     }
 
     /// Whole steps to send. Positive `x` scrolls right and positive `y`
-    /// scrolls up, matching remote wheel conventions.
-    public mutating func steps(for event: NSEvent) -> (x: Int, y: Int) {
-        steps(deltaX: event.scrollingDeltaX, deltaY: event.scrollingDeltaY, isPrecise: event.hasPreciseScrollingDeltas)
+    /// scrolls up, matching remote wheel conventions. `speed` multiplies the
+    /// distance: at 1 a line scrolls one notch, at 2 it scrolls two.
+    public mutating func steps(for event: NSEvent, speed: Double = 1) -> (x: Int, y: Int) {
+        steps(deltaX: event.scrollingDeltaX, deltaY: event.scrollingDeltaY, isPrecise: event.hasPreciseScrollingDeltas, speed: speed)
     }
 
     /// AppKit convention: positive `deltaX` scrolls left, positive `deltaY`
     /// scrolls up. Precise deltas are points; imprecise deltas are lines.
-    mutating func steps(deltaX: CGFloat, deltaY: CGFloat, isPrecise: Bool) -> (x: Int, y: Int) {
-        let scale = CGFloat(stepsPerNotch) / (isPrecise ? Self.pointsPerNotch : 1)
+    mutating func steps(deltaX: CGFloat, deltaY: CGFloat, isPrecise: Bool, speed: Double = 1) -> (x: Int, y: Int) {
+        let speed = CGFloat(min(max(speed, Self.speedRange.lowerBound), Self.speedRange.upperBound))
+        let scale = CGFloat(stepsPerNotch) * speed / (isPrecise ? Self.pointsPerNotch : 1)
         pendingX -= deltaX * scale
         pendingY += deltaY * scale
         let x = Int(pendingX.rounded(.towardZero))

@@ -93,6 +93,9 @@ struct GeneralSettings: PersistedSettings {
     static let `default` = GeneralSettings()
 
     var showsLocalMachine = true
+    /// Multiplies how far RDP and VNC sessions scroll; see
+    /// `ScrollWheelAccumulator.speedRange`.
+    var scrollSpeed = 1.0
 }
 
 typealias GeneralSettingsStore = SettingsStore<GeneralSettings>
