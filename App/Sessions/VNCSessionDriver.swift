@@ -29,15 +29,18 @@ protocol VNCSessionDriving: AnyObject {
 final class RoyalVNCSessionDriver: VNCSessionDriving {
     private let vault: any CredentialVault
     private let settings: @MainActor () -> VNCSettings
+    private let scrollSpeed: @MainActor () -> Double
     private let prompt: @MainActor (VNCCredentialPrompt) -> VNCSessionCredential?
 
     init(
         vault: any CredentialVault,
         settings: @escaping @MainActor () -> VNCSettings = { .default },
+        scrollSpeed: @escaping @MainActor () -> Double = { 1 },
         prompt: @escaping @MainActor (VNCCredentialPrompt) -> VNCSessionCredential? = VNCCredentialPrompter.ask
     ) {
         self.vault = vault
         self.settings = settings
+        self.scrollSpeed = scrollSpeed
         self.prompt = prompt
     }
 
@@ -53,7 +56,7 @@ final class RoyalVNCSessionDriver: VNCSessionDriving {
             keyboardMode: settings.keyboardMode)
         let vault = self.vault
         let prompt = self.prompt
-        let session = RoyalVNCSession(configuration: configuration) { kind in
+        let session = RoyalVNCSession(configuration: configuration, scrollSpeed: scrollSpeed) { kind in
             let stored = request.credentialID.flatMap { try? vault.retrieve(id: $0) }?.withValue { $0 }
             switch kind {
             case .password:

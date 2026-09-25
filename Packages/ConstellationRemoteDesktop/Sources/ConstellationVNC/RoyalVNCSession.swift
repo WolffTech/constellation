@@ -24,10 +24,17 @@ public final class RoyalVNCSession: RemoteDesktopSession {
     private var bridge: DelegateBridge?
     private var framebufferView: VNCCAFramebufferView?
     private var wheel = ScrollWheelAccumulator(stepsPerNotch: 1)
+    /// Read on every scroll so a changed setting applies straight away.
+    private let scrollSpeed: @MainActor () -> Double
     private var scrollMonitor: Any?
 
-    public init(configuration: VNCSessionConfiguration, credentials: @escaping VNCCredentialProvider) {
+    public init(
+        configuration: VNCSessionConfiguration,
+        scrollSpeed: @escaping @MainActor () -> Double = { 1 },
+        credentials: @escaping VNCCredentialProvider
+    ) {
         self.configuration = configuration
+        self.scrollSpeed = scrollSpeed
         self.credentials = credentials
         host = RemoteDesktopHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         view = host
@@ -127,7 +134,7 @@ public final class RoyalVNCSession: RemoteDesktopSession {
         let point = view.convert(event.locationInWindow, from: nil)
         let x = UInt16(clamping: Int(point.x.rounded(.down)))
         let y = UInt16(clamping: Int((view.bounds.height - point.y).rounded(.down)))
-        let steps = wheel.steps(for: event)
+        let steps = wheel.steps(for: event, speed: scrollSpeed())
         for (count, positive, negative) in [(steps.y, VNCMouseWheel.up, VNCMouseWheel.down), (steps.x, .right, .left)] {
             for _ in 0..<abs(count) {
                 connection.mouseWheel(count > 0 ? positive : negative, x: x, y: y, steps: 1)

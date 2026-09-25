@@ -20,6 +20,10 @@ final class RDPSurfaceView: NSView {
     /// Sends translated input to the live session. Set by `RDPSession`.
     var inputSink: ((RDPInputEvent) -> Void)?
 
+    /// Read on every scroll so a changed setting applies straight away. Set
+    /// by `RDPSession`.
+    var scrollSpeed: @MainActor () -> Double = { 1 }
+
     /// The cursor the server last asked for. Set by `RDPSession`.
     var cursorShape: RDPCursorShape = .systemDefault {
         didSet { if cursorShape != oldValue { cursorShapeChanged() } }
@@ -223,7 +227,7 @@ final class RDPSurfaceView: NSView {
 
     override func scrollWheel(with event: NSEvent) {
         guard let point = remotePoint(event) else { return }
-        let steps = wheel.steps(for: event)
+        let steps = wheel.steps(for: event, speed: scrollSpeed())
         if steps.y != 0 { inputSink?(.scroll(delta: steps.y, horizontal: false, x: point.x, y: point.y)) }
         if steps.x != 0 { inputSink?(.scroll(delta: steps.x, horizontal: true, x: point.x, y: point.y)) }
     }

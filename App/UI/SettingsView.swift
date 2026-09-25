@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import ConstellationCore
+import ConstellationRemoteDesktop
 import SwiftUI
 
 /// The Settings window's tabs. The window takes each tab's content size, so
@@ -53,6 +54,27 @@ private struct GeneralSettingsView: View {
                 Text("Sidebar")
             } footer: {
                 Text("Shows This Mac at the top of the machine list for opening local terminals.")
+            }
+
+            Section {
+                LabeledContent("Scroll speed") {
+                    HStack {
+                        Slider(
+                            value: Binding(
+                                get: { settings.value.scrollSpeed },
+                                set: { value in settings.update { $0.scrollSpeed = value } }),
+                            in: ScrollWheelAccumulator.speedRange,
+                            step: 0.25)
+                            .labelsHidden()
+                        Text("\(settings.value.scrollSpeed, format: .number.precision(.fractionLength(0...2)))×")
+                            .monospacedDigit()
+                            .frame(width: 40, alignment: .trailing)
+                    }
+                }
+            } header: {
+                Text("Remote Desktops")
+            } footer: {
+                Text("At 1×, each click of a mouse wheel scrolls the remote desktop by one notch. Changes apply straight away, including to open RDP and VNC sessions.")
             }
         }
         .formStyle(.grouped)

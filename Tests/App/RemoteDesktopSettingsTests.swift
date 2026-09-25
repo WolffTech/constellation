@@ -18,8 +18,11 @@ struct GeneralSettingsTests {
 
         let settings = GeneralSettingsStore(defaults: defaults)
         #expect(settings.value.showsLocalMachine)
-        settings.update { $0.showsLocalMachine = false }
-        #expect(!GeneralSettingsStore(defaults: defaults).value.showsLocalMachine)
+        #expect(settings.value.scrollSpeed == 1)
+        settings.update { $0.showsLocalMachine = false; $0.scrollSpeed = 0.5 }
+        let reloaded = GeneralSettingsStore(defaults: defaults).value
+        #expect(!reloaded.showsLocalMachine)
+        #expect(reloaded.scrollSpeed == 0.5)
     }
 }
 
@@ -51,6 +54,18 @@ struct RemoteDesktopSettingsTests {
         defaults.set(Data("{\"colorDepth\": 99}".utf8), forKey: VNCSettings.defaultsKey)
 
         #expect(VNCSettingsStore(defaults: defaults).value == .default)
+    }
+
+    @Test func settingsMissingFromTheSavedValueTakeTheirDefaults() throws {
+        let suiteName = "RemoteDesktopSettingsTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        // Saved before `connectionQuality` and the rest existed.
+        defaults.set(Data("{\"desktopWidth\": 1920}".utf8), forKey: RDPSettings.defaultsKey)
+
+        var expected = RDPSettings.default
+        expected.desktopWidth = 1920
+        #expect(RDPSettingsStore(defaults: defaults).value == expected)
     }
 
     @Test func vncDriverAppliesTheSettingsToEachSession() throws {

@@ -61,6 +61,7 @@ final class CompositionRoot {
             }
             self.askPass = askPass
             let driver = GhosttySSHSessionDriver(runtime: runtime, askPass: askPass)
+            let generalSettings = generalSettings
             let vncSettings = vncSettings
             let rdpSettings = rdpSettings
             sessions = SessionCoordinator(
@@ -68,8 +69,11 @@ final class CompositionRoot {
                 prober: TCPAddressProber(),
                 driver: driver,
                 localDriver: GhosttyLocalTerminalDriver(runtime: runtime),
-                vncDriver: RoyalVNCSessionDriver(vault: vault, settings: { vncSettings.value }),
-                rdpDriver: FreeRDPSessionDriver(vault: vault, trustStore: trustStore, settings: { rdpSettings.value }))
+                vncDriver: RoyalVNCSessionDriver(
+                    vault: vault, settings: { vncSettings.value }, scrollSpeed: { generalSettings.value.scrollSpeed }),
+                rdpDriver: FreeRDPSessionDriver(
+                    vault: vault, trustStore: trustStore, settings: { rdpSettings.value },
+                    scrollSpeed: { generalSettings.value.scrollSpeed }))
         } catch {
             startupError = error.localizedDescription
         }
