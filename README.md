@@ -34,7 +34,17 @@ Constellation saves your remote machines and opens each session in a tab. It use
 
 Constellation requires an Apple silicon Mac running macOS 15 or later.
 
-1. Download the signed `.dmg` from [GitHub Releases](https://github.com/WolffTech/constellation/releases) when one is available, or [build from source](#build-from-source).
+### Homebrew
+
+Install Constellation from the [Wolff.Tech Homebrew tap](https://github.com/WolffTech/homebrew-tap):
+
+```sh
+brew install --cask wolfftech/tap/constellation
+```
+
+### Manual download
+
+1. Download the signed `.dmg` from [GitHub Releases](https://github.com/WolffTech/constellation/releases), or [build from source](#build-from-source).
 2. Open the disk image and drag Constellation to `/Applications`.
 3. Launch Constellation from `/Applications` and add a machine.
 
