@@ -117,12 +117,57 @@ jobs:
       - name: Package corresponding source
         run: Scripts/package-source.sh "$APP_VERSION"
 
+      # Sparkle shows release notes in the update prompt, so they are needed
+      # before the appcast exists. A release made in the GitHub UI already has
+      # notes; for a plain pushed tag GitHub generates them here, and the
+      # publish step reuses them so the release page matches the prompt.
+      #
+      # Sparkle only shows the notes of the version it offers, so the prompt
+      # also carries the notes of a few earlier releases: someone skipping
+      # versions still sees what changed in between.
+      - name: Collect release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EARLIER_RELEASES: "4"
+        run: |
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          if ! gh release view "$GITHUB_REF_NAME" --json body --jq .body > "$NOTES" 2> /dev/null; then
+            gh api "repos/$GH_REPO/releases/generate-notes" \
+              -f tag_name="$GITHUB_REF_NAME" --jq .body > "$NOTES"
+          fi
+          cat "$NOTES"
+
+          # Each release goes under its own version heading, so its own
+          # headings ("What's Changed") move down a level.
+          demote_headings() { sed -E 's/^(#{1,5}) /#\1 /'; }
+          # The newest release tags older than this one, newest first.
+          earlier_tags() {
+            {
+              gh release list --exclude-drafts --exclude-pre-releases --limit 100 \
+                --json tagName --jq '.[].tagName'
+              echo "$GITHUB_REF_NAME"
+            } | sort -u -r -V | awk -v current="$GITHUB_REF_NAME" -v limit="$EARLIER_RELEASES" '
+              seen && /^v[0-9]+\.[0-9]+\.[0-9]+$/ && n++ < limit { print }
+              $0 == current { seen = 1 }'
+          }
+          {
+            printf '## Version %s\n\n' "$APP_VERSION"
+            demote_headings < "$NOTES"
+            earlier_tags | while read -r tag; do
+              printf '\n## Version %s\n\n' "${tag#v}"
+              gh release view "$tag" --json body --jq .body | demote_headings
+            done
+          } > "$RUNNER_TEMP/update-notes.md"
+          cat "$RUNNER_TEMP/update-notes.md"
+
       # The EdDSA signature covers the exact DMG bytes, so this runs on the
       # final signed, notarized, stapled image, and that same file is the one
       # uploaded below. The app's SUFeedURL is the appcast attached to the
       # latest release, so every tag must publish as a full release.
       - name: Generate Sparkle appcast
         env:
+          GH_TOKEN: ${{ github.token }}
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
           SPARKLE_VERSION: 2.10.0
           SPARKLE_SHA256: c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c
@@ -136,15 +181,25 @@ jobs:
           # generate_appcast writes state next to its archives; give it a
           # copy so nothing touches the DMG that gets uploaded.
           cp "build/release/$APP_VERSION/Constellation-$APP_VERSION.dmg" "$RUNNER_TEMP/appcast-archives/"
+          # An HTML file named after the DMG becomes the item's embedded
+          # release notes. GitHub renders the Markdown so links to pull
+          # requests, users, and the changelog match the release page.
+          gh api markdown \
+            -F text=@"$RUNNER_TEMP/update-notes.md" \
+            -f mode=gfm \
+            -f context="$GITHUB_REPOSITORY" \
+            > "$RUNNER_TEMP/appcast-archives/Constellation-$APP_VERSION.html"
           printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | \
             "$RUNNER_TEMP/sparkle-dist/bin/generate_appcast" \
               --ed-key-file - \
               --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/" \
               --link "https://github.com/${GITHUB_REPOSITORY}" \
+              --embed-release-notes \
               -o "build/release/$APP_VERSION/appcast.xml" \
               "$RUNNER_TEMP/appcast-archives"
           # generate_appcast only signs bundles whose Info.plist has SUPublicEDKey.
           grep -q 'sparkle:edSignature=' "build/release/$APP_VERSION/appcast.xml"
+          grep -q '<description>' "build/release/$APP_VERSION/appcast.xml"
           cat "build/release/$APP_VERSION/appcast.xml"
 
       - name: Publish GitHub release
@@ -166,7 +221,7 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" \
               --title "Constellation $APP_VERSION" \
-              --generate-notes \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
               --verify-tag \
               "$DMG" "$DMG.sha256" \
               "$SOURCE_ZIP" "$SOURCE_ZIP.sha256" \
