@@ -313,6 +313,12 @@ public enum ConnectionProfile: Identifiable, Hashable, Sendable, Codable {
         }
     }
 
+    /// Password authentication with nothing saved, as after an import. Connecting
+    /// still works by prompting; the flag tells the user a password is missing.
+    public var needsPassword: Bool {
+        if case .ssh(let p) = self { p.authentication == .password && p.credentialID == nil } else { false }
+    }
+
     /// Every Keychain reference the profile holds: its own and, for RDP, the gateway's.
     public var credentialIDs: [CredentialID] {
         var ids = credentialID.map { [$0] } ?? []

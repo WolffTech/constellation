@@ -10,7 +10,6 @@ public enum ValidationError: Error, Hashable, Sendable, LocalizedError {
     case invalidHost(String)
     case invalidPort(Int)
     case emptyProfileName
-    case missingCredential(profile: String)
     case missingKeyFile(profile: String)
     case missingGatewayHost(profile: String)
 
@@ -22,7 +21,6 @@ public enum ValidationError: Error, Hashable, Sendable, LocalizedError {
         case .invalidHost(let host): "“\(host)” is not a valid hostname or IP address."
         case .invalidPort(let port): "Port \(port) is out of range. Use 1 through 65535."
         case .emptyProfileName: "Give the profile a name."
-        case .missingCredential(let profile): "“\(profile)” uses password authentication but has no saved password."
         case .missingKeyFile(let profile): "“\(profile)” uses a key file but no path is set."
         case .missingGatewayHost(let profile): "“\(profile)” uses a gateway but no gateway address is set."
         }
@@ -70,8 +68,6 @@ public enum Validator {
         if let port = profile.port { try validatePort(port) }
         if case .ssh(let ssh) = profile {
             switch ssh.authentication {
-            case .password where ssh.credentialID == nil:
-                throw .missingCredential(profile: ssh.name)
             case .keyFile(let path) where path.trimmingCharacters(in: .whitespaces).isEmpty:
                 throw .missingKeyFile(profile: ssh.name)
             default:

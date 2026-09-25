@@ -92,6 +92,16 @@ struct GRDBMachineLibraryTests {
         }
     }
 
+    @Test func importingAPasswordProfileSavesWithoutItsPassword() async throws {
+        let (source, _, _, _, profile) = try await seeded()
+        let exported = try await MachineExport.encode(MachineExport.document(from: source.snapshot()))
+        let document = try MachineExport.decode(exported)
+        let library = try GRDBMachineLibrary.inMemory()
+        try await library.save(MachineExport.importChange(for: document))
+        let imported = try await library.snapshot().profile(profile.id)
+        #expect(imported?.needsPassword == true)
+    }
+
     @Test func validationFailuresAreSurfacedAndNothingIsWritten() async throws {
         let library = try GRDBMachineLibrary.inMemory()
         let machine = Machine(name: "ok")
