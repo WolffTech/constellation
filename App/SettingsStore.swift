@@ -14,8 +14,9 @@ protocol PersistedSettings: Codable, Equatable, Sendable {
 }
 
 /// Owns one `PersistedSettings` value: loads it at launch, saves every change.
-/// Values that fail to decode (an older format, a hand-edited plist) fall back
-/// to the defaults rather than failing startup.
+/// Settings missing from the saved value, such as ones added since it was
+/// saved, take their defaults. Values that still fail to decode (a
+/// hand-edited plist) fall back to the defaults rather than failing startup.
 @MainActor
 @Observable
 final class SettingsStore<Value: PersistedSettings> {
@@ -28,12 +29,18 @@ final class SettingsStore<Value: PersistedSettings> {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: Value.defaultsKey),
-           let decoded = try? JSONDecoder().decode(Value.self, from: data) {
-            value = decoded
-        } else {
-            value = .default
-        }
+        value = defaults.data(forKey: Value.defaultsKey).flatMap(Self.decode) ?? .default
+    }
+
+    /// Lays the saved keys over the encoded defaults before decoding, so a
+    /// missing key doesn't discard every other saved setting.
+    private static func decode(_ data: Data) -> Value? {
+        guard let saved = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let defaultData = try? JSONEncoder().encode(Value.default),
+              let fallback = try? JSONSerialization.jsonObject(with: defaultData) as? [String: Any],
+              let merged = try? JSONSerialization.data(withJSONObject: fallback.merging(saved) { $1 })
+        else { return nil }
+        return try? JSONDecoder().decode(Value.self, from: merged)
     }
 
     func update(_ change: (inout Value) -> Void) {

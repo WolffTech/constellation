@@ -53,6 +53,18 @@ struct RemoteDesktopSettingsTests {
         #expect(VNCSettingsStore(defaults: defaults).value == .default)
     }
 
+    @Test func settingsMissingFromTheSavedValueTakeTheirDefaults() throws {
+        let suiteName = "RemoteDesktopSettingsTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        // Saved before `connectionQuality` and the rest existed.
+        defaults.set(Data("{\"desktopWidth\": 1920}".utf8), forKey: RDPSettings.defaultsKey)
+
+        var expected = RDPSettings.default
+        expected.desktopWidth = 1920
+        #expect(RDPSettingsStore(defaults: defaults).value == expected)
+    }
+
     @Test func vncDriverAppliesTheSettingsToEachSession() throws {
         let settings = VNCSettings(colorDepth: .bits16, sharesSession: false, keyboardMode: .local, defaultDisplayMode: .actualSize)
         let driver = RoyalVNCSessionDriver(vault: InMemoryCredentialVault(), settings: { settings }, prompt: { _ in nil })
