@@ -23,12 +23,25 @@ public final class RoyalVNCSession: RemoteDesktopSession {
     private var connection: VNCConnection?
     private var bridge: DelegateBridge?
     private var framebufferView: VNCCAFramebufferView?
+    private var wheel = ScrollWheelAccumulator(stepsPerNotch: 1)
+    private var scrollMonitor: Any?
 
     public init(configuration: VNCSessionConfiguration, credentials: @escaping VNCCredentialProvider) {
         self.configuration = configuration
         self.credentials = credentials
         host = RemoteDesktopHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         view = host
+        // RoyalVNCKit 1.1.0 presses the wheel button for every step but never
+        // reports the release, so servers see one held button and scroll
+        // once. Scrolling is handled here instead of by the framebuffer view.
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            let handled = MainActor.assumeIsolated { self?.forwardScroll(event) ?? false }
+            return handled ? nil : event
+        }
+    }
+
+    isolated deinit {
+        if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
     }
 
     public func connect() {
@@ -97,6 +110,31 @@ public final class RoyalVNCSession: RemoteDesktopSession {
         host.show(view, framebufferSize: size)
         focus()
         eventHandler?(.framebufferSizeChanged(width: Int(size.width), height: Int(size.height)))
+    }
+
+    // MARK: Input
+
+    /// Sends a scroll over the framebuffer view as wheel clicks, each
+    /// followed by a move that reports the wheel button's release.
+    private func forwardScroll(_ event: NSEvent) -> Bool {
+        guard let view = framebufferView, let connection, let window = view.window, event.window === window else {
+            return false
+        }
+        let root = window.contentView?.superview ?? window.contentView
+        guard root?.hitTest(event.locationInWindow) === view else { return false }
+        // The view is sized to the framebuffer, so points are remote pixels;
+        // it isn't flipped, and VNC's origin is top-left.
+        let point = view.convert(event.locationInWindow, from: nil)
+        let x = UInt16(clamping: Int(point.x.rounded(.down)))
+        let y = UInt16(clamping: Int((view.bounds.height - point.y).rounded(.down)))
+        let steps = wheel.steps(for: event)
+        for (count, positive, negative) in [(steps.y, VNCMouseWheel.up, VNCMouseWheel.down), (steps.x, .right, .left)] {
+            for _ in 0..<abs(count) {
+                connection.mouseWheel(count > 0 ? positive : negative, x: x, y: y, steps: 1)
+                connection.mouseMove(x: x, y: y)
+            }
+        }
+        return true
     }
 
     // MARK: Helpers

@@ -378,10 +378,9 @@ public final class RDPSession: RemoteDesktopSession {
         case let .pointerMove(x, y):
             crdp_session_send_pointer(handle, RDPWire.ptrMove, x, y)
         case let .scroll(delta, horizontal, x, y):
-            let magnitude = UInt16(min(abs(delta), 0xFF) & Int(RDPWire.wheelRotationMask))
-            var flags = (horizontal ? RDPWire.ptrHWheel : RDPWire.ptrWheel) | magnitude
-            if delta < 0 { flags |= RDPWire.wheelNegative }
-            crdp_session_send_pointer(handle, flags, x, y)
+            for flags in RDPWire.wheelFlags(delta: delta, horizontal: horizontal) {
+                crdp_session_send_pointer(handle, flags, x, y)
+            }
         case let .key(macKeyCode, down):
             var extended = false
             let scancode = crdp_scancode_for_mac_keycode(macKeyCode, &extended)
@@ -447,7 +446,7 @@ private extension RDPConnectionQuality {
 
 /// Wire values from FreeRDP's input.h. Defined here because the C bridge header
 /// keeps FreeRDP's headers private.
-private enum RDPWire {
+enum RDPWire {
     static let ptrMove: UInt16 = 0x0800
     static let ptrDown: UInt16 = 0x8000
     static let ptrButton1: UInt16 = 0x1000
@@ -459,6 +458,21 @@ private enum RDPWire {
     static let wheelRotationMask: UInt16 = 0x01FF
     static let kbdExtended: UInt16 = 0x0100
     static let kbdRelease: UInt16 = 0x8000
+
+    /// Pointer flags for a wheel rotation, split into events the 9-bit
+    /// two's-complement rotation field can carry (-255...255 here).
+    static func wheelFlags(delta: Int, horizontal: Bool) -> [UInt16] {
+        let axis = horizontal ? ptrHWheel : ptrWheel
+        var remaining = delta
+        var events: [UInt16] = []
+        while remaining != 0 {
+            let chunk = max(-0xFF, min(0xFF, remaining))
+            remaining -= chunk
+            // The sign bit of the 9-bit value is `wheelNegative`.
+            events.append(axis | (UInt16(bitPattern: Int16(chunk)) & wheelRotationMask))
+        }
+        return events
+    }
 }
 
 private func withOptionalCString<Result>(_ string: String?, _ body: (UnsafePointer<CChar>?) -> Result) -> Result {
