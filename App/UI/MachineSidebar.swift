@@ -112,6 +112,38 @@ private struct GroupHeaderTitle: View {
     }
 }
 
+/// Flags profiles set to password authentication with no saved password,
+/// typically right after an import, so the user knows which to fill in.
+private struct MissingPasswordIndicator: View {
+    let help: String
+
+    var body: some View {
+        Image(systemName: "exclamationmark.triangle.fill")
+            .symbolRenderingMode(.multicolor)
+            .imageScale(.small)
+            .help(help)
+            .accessibilityLabel(help)
+    }
+}
+
+/// A sidebar row title that can carry the missing-password flag.
+private struct SidebarRowLabel: View {
+    let title: String
+    let systemImage: String
+    let missingPasswordHelp: String?
+
+    var body: some View {
+        Label {
+            HStack(spacing: 4) {
+                Text(title)
+                if let missingPasswordHelp { MissingPasswordIndicator(help: missingPasswordHelp) }
+            }
+        } icon: {
+            Image(systemName: systemImage)
+        }
+    }
+}
+
 struct MachineSidebar: View {
     let store: MachineStore
     let sessions: SessionCoordinator
@@ -460,7 +492,10 @@ struct MachineSidebar: View {
         return DisclosureGroup(isExpanded: expansion.binding(for: machine.id)) {
             ForEach(profiles) { profileRow($0, of: machine, reorderable: reorderable) }
         } label: {
-            let label = Label(machine.name, systemImage: "server.rack")
+            let label = SidebarRowLabel(
+                title: machine.name,
+                systemImage: "server.rack",
+                missingPasswordHelp: missingPasswordHelp(profiles))
                 .badge(sessions.openSessionCount(forMachine: machine.id))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -517,7 +552,10 @@ struct MachineSidebar: View {
     }
 
     private func profileRow(_ profile: ConnectionProfile, of machine: Machine, reorderable: Bool) -> some View {
-        let label = Label(profile.name, systemImage: profile.protocolKind.symbolName)
+        let label = SidebarRowLabel(
+            title: profile.name,
+            systemImage: profile.protocolKind.symbolName,
+            missingPasswordHelp: profile.needsPassword ? "No saved password · edit the machine to add one" : nil)
             .badge(sessions.openSessionCount(forProfile: profile.id))
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -553,6 +591,12 @@ struct MachineSidebar: View {
 
     private func moveToEnd(_ machine: Machine, of groupID: GroupID?) {
         Task { await store.save(.moveMachine(machine.id, to: groupID, position: .max)) }
+    }
+
+    private func missingPasswordHelp(_ profiles: [ConnectionProfile]) -> String? {
+        let missing = profiles.filter(\.needsPassword).map(\.name)
+        guard !missing.isEmpty else { return nil }
+        return "No saved password for \(missing.formatted(.list(type: .and))) · edit the machine to add one"
     }
 
     private func hosts(of machine: Machine) -> String {
