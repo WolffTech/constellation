@@ -119,6 +119,12 @@ final class SessionWindowManager: NSObject, NSWindowDelegate {
             showTabBarIfNeeded(on: window)
         }
 
+        // Only the browser window's bridge drives this manager. Closing it while
+        // sessions are open would leave every later session without a tab.
+        if browserWindow.styleMask.contains(.closable) != sessions.isEmpty {
+            browserWindow.styleMask.formSymmetricDifference(.closable)
+        }
+
         if sessions.isEmpty {
             if !browserWindow.isVisible {
                 browserWindow.makeKeyAndOrderFront(nil)
