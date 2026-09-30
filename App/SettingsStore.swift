@@ -96,6 +96,23 @@ struct GeneralSettings: PersistedSettings {
     /// Multiplies how far RDP and VNC sessions scroll; see
     /// `ScrollWheelAccumulator.speedRange`.
     var scrollSpeed = 1.0
+    var remoteSessionEnd: RemoteSessionEndBehavior = .keepTab
+}
+
+/// What a tab does when its remote session ends cleanly from the remote
+/// side, such as `exit` over SSH or signing out of a desktop. Failures and
+/// the Disconnect command always keep the tab.
+enum RemoteSessionEndBehavior: String, Codable, CaseIterable, Sendable {
+    /// Leave the tab open with its Reconnect banner.
+    case keepTab
+    case closeTab
+
+    var displayName: String {
+        switch self {
+        case .keepTab: "Keep the tab open"
+        case .closeTab: "Close the tab"
+        }
+    }
 }
 
 typealias GeneralSettingsStore = SettingsStore<GeneralSettings>

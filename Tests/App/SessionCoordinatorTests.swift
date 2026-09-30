@@ -626,7 +626,83 @@ struct SessionCoordinatorTests {
         #expect(coordinator.sessions.first?.state == .failed(.unsupportedProtocol(.rdp)))
     }
 
-    private func coordinatorWithVNCMachine(defaultDisplayMode: RemoteDesktopDisplayMode = .fit) async throws -> (SessionCoordinator, GRDBMachineLibrary, Machine, StubVNCDriver) {
+    @Test func cleanSSHExitKeepsTheTabByDefault() async throws {
+        let (coordinator, _, profile, driver) = try await coordinatorWithOneMachine()
+        let id = try await coordinator.open(profileID: profile.id)
+        let session = try #require(driver.sessions.last)
+
+        session.terminal.emit(.titleChanged("constellation-exit:\(session.exitStatusChannel.token):0"))
+        session.terminal.emit(.processExited(code: 0, runtime: .seconds(1)))
+        await settle()
+
+        #expect(coordinator.sessions.first(where: { $0.id == id })?.state == .disconnected)
+    }
+
+    @Test func cleanSSHExitClosesTheTabWhenChosen() async throws {
+        let (coordinator, _, profile, driver) = try await coordinatorWithOneMachine(remoteSessionEnd: .closeTab)
+        let id = try await coordinator.open(profileID: profile.id)
+        let session = try #require(driver.sessions.last)
+
+        session.terminal.emit(.titleChanged("constellation-exit:\(session.exitStatusChannel.token):0"))
+        session.terminal.emit(.processExited(code: 0, runtime: .seconds(1)))
+        await settle()
+
+        #expect(!coordinator.sessions.contains { $0.id == id })
+        #expect(session.terminal.isClosed)
+    }
+
+    @Test func failedSSHExitKeepsTheTabEvenWhenClosingIsChosen() async throws {
+        let (coordinator, _, profile, driver) = try await coordinatorWithOneMachine(remoteSessionEnd: .closeTab)
+        let id = try await coordinator.open(profileID: profile.id)
+        let session = try #require(driver.sessions.last)
+
+        session.terminal.emit(.titleChanged("constellation-exit:\(session.exitStatusChannel.token):255"))
+        session.terminal.emit(.processExited(code: 0, runtime: .seconds(1)))
+        await settle()
+
+        #expect(coordinator.sessions.first(where: { $0.id == id })?.state == .failed(.sshExited(255)))
+    }
+
+    @Test func remoteDesktopSignOutClosesTheTabButDisconnectKeepsIt() async throws {
+        let (coordinator, library, machine, vncDriver) = try await coordinatorWithVNCMachine(remoteSessionEnd: .closeTab)
+        let profile = try #require(await library.snapshot().profiles(for: machine.id).first)
+        let disconnected = try await coordinator.open(profileID: profile.id)
+        let signedOut = try await coordinator.open(profileID: profile.id)
+        let (first, second) = (vncDriver.sessions[0], vncDriver.sessions[1])
+        first.emit(.stateChanged(.connected))
+        second.emit(.stateChanged(.connected))
+
+        coordinator.disconnect(sessionID: disconnected)
+        first.emit(.stateChanged(.disconnected(nil)))
+        second.emit(.stateChanged(.disconnected(nil)))
+        await settle()
+
+        #expect(coordinator.sessions.map(\.id) == [disconnected])
+        #expect(coordinator.sessions.first?.state == .disconnected)
+    }
+
+    @Test func reconnectingBeforeTheTabClosesKeepsIt() async throws {
+        let (coordinator, _, profile, driver) = try await coordinatorWithOneMachine(remoteSessionEnd: .closeTab)
+        let id = try await coordinator.open(profileID: profile.id)
+        let session = try #require(driver.sessions.last)
+
+        session.terminal.emit(.titleChanged("constellation-exit:\(session.exitStatusChannel.token):0"))
+        session.terminal.emit(.processExited(code: 0, runtime: .seconds(1)))
+        try await coordinator.reconnect(sessionID: id)
+        await settle()
+
+        #expect(coordinator.sessions.first(where: { $0.id == id })?.state.isConnecting == true)
+    }
+
+    /// Lets the coordinator's deferred tab close run.
+    private func settle() async {
+        for _ in 0..<5 { await Task.yield() }
+    }
+
+    private func coordinatorWithVNCMachine(
+        defaultDisplayMode: RemoteDesktopDisplayMode = .fit,
+        remoteSessionEnd: RemoteSessionEndBehavior = .keepTab
+    ) async throws -> (SessionCoordinator, GRDBMachineLibrary, Machine, StubVNCDriver) {
         let library = try GRDBMachineLibrary.inMemory()
         let machine = Machine(name: "screen")
         let address = MachineAddress(machineID: machine.id, label: "", host: "vnc.box")
@@ -638,11 +714,14 @@ struct SessionCoordinatorTests {
             prober: StubProber(results: ["vnc.box": true]),
             driver: StubSSHDriver(),
             localDriver: StubLocalTerminalDriver(),
-            vncDriver: vncDriver)
+            vncDriver: vncDriver,
+            remoteSessionEnd: { remoteSessionEnd })
         return (coordinator, library, machine, vncDriver)
     }
 
-    private func coordinatorWithOneMachine() async throws -> (SessionCoordinator, GRDBMachineLibrary, SSHProfile, StubSSHDriver) {
+    private func coordinatorWithOneMachine(
+        remoteSessionEnd: RemoteSessionEndBehavior = .keepTab
+    ) async throws -> (SessionCoordinator, GRDBMachineLibrary, SSHProfile, StubSSHDriver) {
         let library = try GRDBMachineLibrary.inMemory()
         let machine = Machine(name: "box")
         let address = MachineAddress(machineID: machine.id, label: "LAN", host: "box.local")
@@ -652,7 +731,8 @@ struct SessionCoordinatorTests {
         return (
             SessionCoordinator(
                 library: library, prober: StubProber(results: ["box.local": true]),
-                driver: driver, localDriver: StubLocalTerminalDriver()),
+                driver: driver, localDriver: StubLocalTerminalDriver(),
+                remoteSessionEnd: { remoteSessionEnd }),
             library,
             profile,
             driver)
