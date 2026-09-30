@@ -19,10 +19,12 @@ struct GeneralSettingsTests {
         let settings = GeneralSettingsStore(defaults: defaults)
         #expect(settings.value.showsLocalMachine)
         #expect(settings.value.scrollSpeed == 1)
-        settings.update { $0.showsLocalMachine = false; $0.scrollSpeed = 0.5 }
+        #expect(settings.value.remoteSessionEnd == .keepTab)
+        settings.update { $0.showsLocalMachine = false; $0.scrollSpeed = 0.5; $0.remoteSessionEnd = .closeTab }
         let reloaded = GeneralSettingsStore(defaults: defaults).value
         #expect(!reloaded.showsLocalMachine)
         #expect(reloaded.scrollSpeed == 0.5)
+        #expect(reloaded.remoteSessionEnd == .closeTab)
     }
 }
 

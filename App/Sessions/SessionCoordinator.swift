@@ -57,10 +57,13 @@ final class SessionCoordinator {
     private let localDriver: any LocalTerminalDriving
     private let vncDriver: (any VNCSessionDriving)?
     private let rdpDriver: (any RDPSessionDriving)?
+    private let remoteSessionEnd: @MainActor () -> RemoteSessionEndBehavior
     private var handles: [SessionID: LiveSession] = [:]
     private var attempts: [SessionID: UUID] = [:]
     private var reportedExitStatuses: [SessionID: Int32] = [:]
     private var pendingConnectionFacts: [SessionID: ConnectionFacts] = [:]
+    /// Remote desktops the user disconnected, whose disconnected event is still to come.
+    private var requestedDisconnects: Set<SessionID> = []
     private var workspaceSaveTask: Task<Void, Never>?
 
     init(
@@ -69,7 +72,8 @@ final class SessionCoordinator {
         driver: any SSHSessionDriving,
         localDriver: any LocalTerminalDriving,
         vncDriver: (any VNCSessionDriving)? = nil,
-        rdpDriver: (any RDPSessionDriving)? = nil
+        rdpDriver: (any RDPSessionDriving)? = nil,
+        remoteSessionEnd: @escaping @MainActor () -> RemoteSessionEndBehavior = { .keepTab }
     ) {
         self.library = library
         self.prober = prober
@@ -77,6 +81,7 @@ final class SessionCoordinator {
         self.localDriver = localDriver
         self.vncDriver = vncDriver
         self.rdpDriver = rdpDriver
+        self.remoteSessionEnd = remoteSessionEnd
     }
 
     var selectedSession: SessionSummary? {
@@ -251,6 +256,7 @@ final class SessionCoordinator {
             update(sessionID) { $0.state = .disconnected }
         case .remoteDesktop(let session) where session.state.isLive:
             // The desktop closes asynchronously; its disconnected event finishes this.
+            requestedDisconnects.insert(sessionID)
             update(sessionID) { $0.state = .disconnecting }
             session.disconnect()
         case .remoteDesktop:
@@ -266,6 +272,7 @@ final class SessionCoordinator {
         handles.removeValue(forKey: sessionID)?.close()
         reportedExitStatuses.removeValue(forKey: sessionID)
         pendingConnectionFacts.removeValue(forKey: sessionID)
+        requestedDisconnects.remove(sessionID)
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
         let closing = sessions.remove(at: index)
         if selectedSessionID == sessionID {
@@ -536,6 +543,7 @@ final class SessionCoordinator {
         let attempt = UUID()
         attempts[sessionID] = attempt
         reportedExitStatuses.removeValue(forKey: sessionID)
+        requestedDisconnects.remove(sessionID)
         guard let summary = sessions.first(where: { $0.id == sessionID }) else { return }
 
         switch summary.target {
@@ -786,7 +794,11 @@ final class SessionCoordinator {
             handle.finish()
             pendingConnectionFacts.removeValue(forKey: sessionID)
             if let code = reportedExitStatuses.removeValue(forKey: sessionID) {
-                update(sessionID) { $0.state = code == 0 ? .disconnected : .failed(.sshExited(code)) }
+                if code == 0 {
+                    endRemoteSession(sessionID)
+                } else {
+                    update(sessionID) { $0.state = .failed(.sshExited(code)) }
+                }
             } else {
                 update(sessionID) { $0.state = .failed(.endedWithoutStatus) }
             }
@@ -837,16 +849,31 @@ final class SessionCoordinator {
                 update(sessionID) { $0.state = .disconnecting }
             case .disconnected(let failure):
                 handles.removeValue(forKey: sessionID)?.close()
-                update(sessionID) {
-                    switch failure {
-                    case nil: $0.state = .disconnected
-                    case let failure? where failure.isAuthenticationFailure: $0.state = .failed(.authenticationFailed(failure.message))
-                    case let failure?: $0.state = .failed(.remoteDesktop(failure.message))
-                    }
+                let requested = requestedDisconnects.remove(sessionID) != nil
+                switch failure {
+                case nil where requested: update(sessionID) { $0.state = .disconnected }
+                case nil: endRemoteSession(sessionID)
+                case let failure? where failure.isAuthenticationFailure:
+                    update(sessionID) { $0.state = .failed(.authenticationFailed(failure.message)) }
+                case let failure?: update(sessionID) { $0.state = .failed(.remoteDesktop(failure.message)) }
                 }
             }
         case .framebufferSizeChanged:
             break
+        }
+    }
+
+    /// A remote session that ended cleanly from the remote side. The close
+    /// waits a turn: this runs inside the driver's own callback, and SSH's
+    /// terminal surface must not be freed from within it.
+    private func endRemoteSession(_ sessionID: SessionID) {
+        update(sessionID) { $0.state = .disconnected }
+        guard remoteSessionEnd() == .closeTab else { return }
+        let attempt = attempts[sessionID]
+        Task { @MainActor [weak self] in
+            // A reconnect or close in the meantime starts a new attempt.
+            guard let self, attempts[sessionID] == attempt else { return }
+            close(sessionID: sessionID)
         }
     }
 

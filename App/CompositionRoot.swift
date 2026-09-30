@@ -73,7 +73,8 @@ final class CompositionRoot {
                     vault: vault, settings: { vncSettings.value }, scrollSpeed: { generalSettings.value.scrollSpeed }),
                 rdpDriver: FreeRDPSessionDriver(
                     vault: vault, trustStore: trustStore, settings: { rdpSettings.value },
-                    scrollSpeed: { generalSettings.value.scrollSpeed }))
+                    scrollSpeed: { generalSettings.value.scrollSpeed }),
+                remoteSessionEnd: { generalSettings.value.remoteSessionEnd })
         } catch {
             startupError = error.localizedDescription
         }

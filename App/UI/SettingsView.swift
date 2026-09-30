@@ -57,6 +57,20 @@ private struct GeneralSettingsView: View {
             }
 
             Section {
+                Picker("When a remote session ends", selection: Binding(
+                    get: { settings.value.remoteSessionEnd },
+                    set: { value in settings.update { $0.remoteSessionEnd = value } })) {
+                    ForEach(RemoteSessionEndBehavior.allCases, id: \.self) { behavior in
+                        Text(behavior.displayName).tag(behavior)
+                    }
+                }
+            } header: {
+                Text("Sessions")
+            } footer: {
+                Text("Applies when the remote side ends the session, such as typing exit over SSH or signing out of a remote desktop. Sessions that fail or that you disconnect keep their tab.")
+            }
+
+            Section {
                 LabeledContent("Scroll speed") {
                     HStack {
                         Slider(
