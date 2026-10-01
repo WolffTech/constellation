@@ -44,8 +44,11 @@ final class MachineStore {
         }
     }
 
-    /// Saves an editor draft: library change first, then vault writes, so a
-    /// rejected draft leaves no stray Keychain items.
+    /// Saves an editor draft. Secrets are written before the library refers to
+    /// them, and put back as they were if the vault or the library fails, so a
+    /// profile is never saved without the password it was given and a rejected
+    /// draft leaves no stray Keychain items. Secrets the draft dropped are
+    /// removed only once the library no longer refers to them.
     func save(_ draft: MachineDraft) async -> Bool {
         let change: MachineLibraryChange
         do {
@@ -54,19 +57,67 @@ final class MachineStore {
             presentedError = error.localizedDescription
             return false
         }
-        guard await save(change) else { return false }
+        var replaced: [(id: CredentialID, previous: Secret?)] = []
         do {
             for pending in draft.pendingSecrets {
+                let previous = try existingSecret(pending.credentialID)
                 try vault.store(pending.secret, for: pending.credentialID)
-            }
-            for id in draft.removedCredentialIDs where snapshot.credential(id) == nil {
-                try vault.remove(id: id)
+                replaced.append((pending.credentialID, previous))
             }
         } catch {
-            presentedError = error.localizedDescription
+            presentedError = error.localizedDescription + restoreNote(restore(replaced))
             return false
         }
+        let before = snapshot
+        guard await save(change) else {
+            presentedError = (presentedError ?? "") + restoreNote(restore(replaced))
+            return false
+        }
+        var kept: [CredentialReference] = []
+        var failure: (any Error)?
+        for id in draft.removedCredentialIDs where snapshot.credential(id) == nil {
+            do {
+                try vault.remove(id: id)
+            } catch {
+                failure = failure ?? error
+                if let reference = before.credential(id) { kept.append(reference) }
+            }
+        }
+        if let failure {
+            // Restoring the reference leaves it orphaned, so it is offered for
+            // removal again rather than lingering unseen in the Keychain.
+            if !kept.isEmpty { await save(.batch(kept.map { .upsertCredential($0) })) }
+            presentedError = "The machine was saved, but a password it no longer uses couldn’t be removed from the Keychain. \(failure.localizedDescription)"
+        }
         return true
+    }
+
+    /// `nil` when the vault has nothing for `id`; any other failure throws so a
+    /// rollback never deletes a secret it could not read.
+    private func existingSecret(_ id: CredentialID) throws -> Secret? {
+        do {
+            return try vault.retrieve(id: id)
+        } catch CredentialVaultError.notFound {
+            return nil
+        }
+    }
+
+    /// Puts back what `save(_ draft:)` replaced, newest first. Returns whether
+    /// every secret was restored.
+    private func restore(_ replaced: [(id: CredentialID, previous: Secret?)]) -> Bool {
+        var restored = true
+        for (id, previous) in replaced.reversed() {
+            do {
+                if let previous { try vault.store(previous, for: id) } else { try vault.remove(id: id) }
+            } catch {
+                restored = false
+            }
+        }
+        return restored
+    }
+
+    private func restoreNote(_ restored: Bool) -> String {
+        restored ? "" : " The Keychain could not be returned to its previous state; re-enter the passwords for this machine."
     }
 
     /// Deletes the machine and returns credentials that no remaining profile
@@ -76,10 +127,25 @@ final class MachineStore {
         return snapshot.orphanedCredentials
     }
 
+    /// Removes secrets from the vault first and drops the library's reference
+    /// only to those that are gone, so one the Keychain refused stays orphaned
+    /// and is offered for removal again.
     func removeCredentials(_ credentials: [CredentialReference]) async {
-        guard await save(.batch(credentials.map { .deleteCredential($0.id) })) else { return }
+        var removed: [CredentialID] = []
+        var failure: (any Error)?
         for credential in credentials {
-            try? vault.remove(id: credential.id)
+            do {
+                try vault.remove(id: credential.id)
+                removed.append(credential.id)
+            } catch {
+                failure = failure ?? error
+            }
+        }
+        if !removed.isEmpty {
+            guard await save(.batch(removed.map { .deleteCredential($0) })) else { return }
+        }
+        if let failure {
+            presentedError = "Some passwords couldn’t be removed from the Keychain. \(failure.localizedDescription)"
         }
     }
 
