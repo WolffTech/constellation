@@ -14,7 +14,12 @@ machines you configure. It is made by Wolff.Tech.
   `~/Library/Application Support/Constellation/trust.sqlite`.
 - Saved passwords and passphrases in the macOS login Keychain, as items
   labelled "Constellation credential".
-- Terminal appearance settings and window state in the app's preferences.
+- Terminal appearance settings, window state and update settings in the
+  app's preferences.
+- Microsoft sign-in cookies, if you use Azure Virtual Desktop, in the app's
+  web data (`~/Library/WebKit/tech.wolff.Constellation` and
+  `~/Library/HTTPStorages/tech.wolff.Constellation`). They keep you signed in
+  to Microsoft Entra ID so the next connection need not ask again.
 
 SSH host keys are handled by the system's OpenSSH and stored in
 `~/.ssh/known_hosts`, as with any ssh client. If you turn on "Use my Ghostty
@@ -24,10 +29,24 @@ and does not write to them.
 
 ## What leaves your Mac
 
-Only the connections you start: SSH, VNC and RDP traffic to the hosts you
-configure, and clipboard text for RDP profiles where you turned sharing on.
-Constellation has no accounts, no analytics, no telemetry, no crash
-reporting and no update checks, and contacts no server of its own.
+- The connections you start: SSH, VNC and RDP traffic to the hosts you
+  configure, and clipboard text for RDP profiles where you turned sharing on.
+- Update checks. Constellation uses Sparkle to fetch its update feed and
+  update downloads from the project's GitHub releases. After asking once, it
+  checks automatically unless you turn that off in Settings; you can also
+  check from the app menu. GitHub sees your IP address and the app version
+  in the request. No other system information is sent.
+- Azure Virtual Desktop sign-in, only when you add or connect to an Azure
+  Virtual Desktop. The sign-in page is Microsoft's own
+  (`login.microsoftonline.com`, or `login.microsoftonline.us` for Azure US
+  Government), shown in a window inside the app, and what you enter there
+  goes to Microsoft. Constellation then asks Azure Virtual Desktop
+  (`rdweb.wvd.microsoft.com` or `rdweb.wvd.azure.us`) for your assigned
+  desktops and their connection details, and connects through its gateway.
+  Access tokens are kept in memory only.
+
+Constellation has no accounts, no analytics, no telemetry and no crash
+reporting, and contacts no server of its own.
 
 ## Support bundles
 
@@ -42,7 +61,10 @@ unless you send it.
 ## Removing your data
 
 Delete the app, the `~/Library/Application Support/Constellation` folder,
-the `tech.wolff.Constellation` preferences, and the "Constellation
+the `tech.wolff.Constellation` preferences, the
+`~/Library/WebKit/tech.wolff.Constellation`,
+`~/Library/HTTPStorages/tech.wolff.Constellation` and
+`~/Library/Caches/tech.wolff.Constellation` folders, and the "Constellation
 credential" items in Keychain Access.
 
 ## Contact
