@@ -43,6 +43,11 @@ struct GhosttyConfigTests {
         #expect(appConfig.diagnostics.isEmpty)
     }
 
+    @Test func loggedDiagnosticsHideTheHomeDirectory() {
+        let message = "/Users/nick/.config/ghostty/config:3: unknown field"
+        #expect(GhosttyConfig.redactingHome(message, home: "/Users/nick") == "~/.config/ghostty/config:3: unknown field")
+    }
+
     private func fontSize(of config: GhosttyConfig) -> Float? {
         var value: Float = 0
         let key = "font-size"
