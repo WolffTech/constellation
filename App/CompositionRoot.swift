@@ -209,7 +209,8 @@ final class CompositionRoot {
     }
 
     /// Confirms when live sessions exist, then persists the workspace before
-    /// AppKit finishes quitting.
+    /// AppKit finishes quitting. If the workspace can't be saved, the user
+    /// chooses between quitting without it and staying.
     func prepareForTermination() -> NSApplication.TerminateReply {
         guard let sessions else { return .terminateNow }
         if sessions.needsQuitConfirmation {
@@ -222,10 +223,28 @@ final class CompositionRoot {
         }
         sessions.disconnectAllForTermination()
         Task {
-            try? await sessions.persistWorkspace()
-            NSApplication.shared.reply(toApplicationShouldTerminate: true)
+            do {
+                try await sessions.persistWorkspace()
+                NSApplication.shared.reply(toApplicationShouldTerminate: true)
+            } catch {
+                NSApplication.shared.reply(toApplicationShouldTerminate: Self.quitWithoutWorkspace(error))
+            }
         }
         return .terminateLater
+    }
+
+    private static func quitWithoutWorkspace(_ error: any Error) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Couldn’t save your open tabs"
+        alert.informativeText = """
+            If you quit now, these tabs won’t reopen next time.
+
+            \(error.localizedDescription)
+            """
+        alert.addButton(withTitle: "Quit Anyway")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// `~/Library/Application Support/Constellation/library.sqlite`, or

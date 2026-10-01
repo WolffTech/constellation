@@ -29,11 +29,22 @@ struct RDPTrustTests {
         }
     }
 
+    private func resolve(
+        _ certificate: RDPCertificate,
+        machineName: String,
+        trustStore: any TrustStore,
+        prompt: @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision
+    ) async -> RDPCertificateVerdict {
+        await resolveCertificate(
+            certificate, machineName: machineName, trustStore: trustStore, prompt: prompt,
+            trustNotSaved: { _, _, error in Issue.record(error, "trust decision unexpectedly not saved") })
+    }
+
     @Test func trustedFingerprintConnectsWithoutPrompting() async throws {
         let store = InMemoryTrustStore()
         try await store.trust(TrustedCertificate(host: "win11", port: 3389, fingerprint: "AA:BB:CC", subject: "", issuer: "", commonName: ""))
         let prompt = Prompt(.reject)
-        let verdict = await resolveCertificate(cert(), machineName: "win11", trustStore: store, prompt: prompt.ask)
+        let verdict = await resolve(cert(), machineName: "win11", trustStore: store, prompt: prompt.ask)
         #expect(verdict == .acceptOnce)
         #expect(prompt.calls.isEmpty)
     }
@@ -41,7 +52,7 @@ struct RDPTrustTests {
     @Test func unknownCertificatePromptsAsFirstUse() async throws {
         let store = InMemoryTrustStore()
         let prompt = Prompt(.connectOnce)
-        let verdict = await resolveCertificate(cert(), machineName: "win11", trustStore: store, prompt: prompt.ask)
+        let verdict = await resolve(cert(), machineName: "win11", trustStore: store, prompt: prompt.ask)
         #expect(verdict == .acceptOnce)
         #expect(prompt.calls.count == 1)
         #expect(prompt.calls.first?.1 == false)
@@ -52,7 +63,7 @@ struct RDPTrustTests {
     @Test func alwaysTrustPersistsTheFingerprint() async throws {
         let store = InMemoryTrustStore()
         let prompt = Prompt(.trustAlways)
-        let verdict = await resolveCertificate(cert(), machineName: "win11", trustStore: store, prompt: prompt.ask)
+        let verdict = await resolve(cert(), machineName: "win11", trustStore: store, prompt: prompt.ask)
         #expect(verdict == .acceptOnce)
         #expect(try await store.trusted(host: "win11", port: 3389)?.fingerprint == "AA:BB:CC")
     }
@@ -62,7 +73,7 @@ struct RDPTrustTests {
         try await store.trust(TrustedCertificate(host: "win11", port: 3389, fingerprint: "AA:BB:CC", subject: "", issuer: "", commonName: ""))
         try await store.forget(host: "win11", port: 3389)
         let prompt = Prompt(.connectOnce)
-        let verdict = await resolveCertificate(cert(), machineName: "win11", trustStore: store, prompt: prompt.ask)
+        let verdict = await resolve(cert(), machineName: "win11", trustStore: store, prompt: prompt.ask)
         #expect(verdict == .acceptOnce)
         #expect(prompt.calls.count == 1)
         #expect(prompt.calls.first?.1 == false, "a forgotten server is not a changed one")
@@ -71,7 +82,7 @@ struct RDPTrustTests {
     @Test func alwaysTrustRecordsWhenTheDecisionWasMade() async throws {
         let store = InMemoryTrustStore()
         let before = Date()
-        _ = await resolveCertificate(cert(), machineName: "win11", trustStore: store, prompt: Prompt(.trustAlways).ask)
+        _ = await resolve(cert(), machineName: "win11", trustStore: store, prompt: Prompt(.trustAlways).ask)
         let trustedAt = try #require(try await store.trusted(host: "win11", port: 3389)?.trustedAt)
         #expect(trustedAt >= before && trustedAt <= Date())
     }
@@ -80,8 +91,25 @@ struct RDPTrustTests {
         let store = InMemoryTrustStore()
         try await store.trust(TrustedCertificate(host: "win11", port: 3389, fingerprint: "OLD", subject: "", issuer: "", commonName: ""))
         let prompt = Prompt(.reject)
-        let verdict = await resolveCertificate(cert(fingerprint: "NEW"), machineName: "win11", trustStore: store, prompt: prompt.ask)
+        let verdict = await resolve(cert(fingerprint: "NEW"), machineName: "win11", trustStore: store, prompt: prompt.ask)
         #expect(verdict == .reject)
         #expect(prompt.calls.first?.1 == true, "expected the changed warning")
     }
+
+    @Test func unsavedAlwaysTrustIsReportedAndStillConnects() async {
+        var reported: [String] = []
+        let verdict = await resolveCertificate(
+            cert(), machineName: "win11", trustStore: RefusingTrustStore(), prompt: Prompt(.trustAlways).ask,
+            trustNotSaved: { _, name, _ in reported.append(name) })
+        #expect(verdict == .acceptOnce)
+        #expect(reported == ["win11"])
+    }
+}
+
+private struct RefusingTrustStore: TrustStore {
+    struct Refused: Error {}
+    func trusted(host: String, port: Int) async throws -> TrustedCertificate? { nil }
+    func trust(_ certificate: TrustedCertificate) async throws { throw Refused() }
+    func forget(host: String, port: Int) async throws {}
+    func all() async throws -> [TrustedCertificate] { [] }
 }

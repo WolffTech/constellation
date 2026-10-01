@@ -39,6 +39,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
     private let scrollSpeed: @MainActor () -> Double
     private let credentialPrompt: @MainActor (RDPCredentialPrompt) -> RDPCredentialEntry?
     private let certificatePrompt: @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision
+    private let trustNotSaved: @MainActor (RDPCertificate, String, any Error) -> Void
     private let entraSignInPrompt: @MainActor @Sendable (RDPEntraSignInRequest, String) async -> String?
 
     init(
@@ -48,6 +49,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         scrollSpeed: @escaping @MainActor () -> Double = { 1 },
         credentialPrompt: @escaping @MainActor (RDPCredentialPrompt) -> RDPCredentialEntry? = RDPCredentialPrompter.ask,
         certificatePrompt: @escaping @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision = RDPCertificatePrompter.ask,
+        trustNotSaved: @escaping @MainActor (RDPCertificate, String, any Error) -> Void = RDPCertificatePrompter.reportTrustNotSaved,
         entraSignInPrompt: @escaping @MainActor @Sendable (RDPEntraSignInRequest, String) async -> String? = RDPEntraSignInPrompter.ask
     ) {
         self.vault = vault
@@ -56,6 +58,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
         self.scrollSpeed = scrollSpeed
         self.credentialPrompt = credentialPrompt
         self.certificatePrompt = certificatePrompt
+        self.trustNotSaved = trustNotSaved
         self.entraSignInPrompt = entraSignInPrompt
     }
 
@@ -99,6 +102,7 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
             connectionQuality: settings.connectionQuality,
             gateway: gateway)
         let certificatePrompt = self.certificatePrompt
+        let trustNotSaved = self.trustNotSaved
         let trustStore = self.trustStore
         let machineName = request.machineName
         let entraSignInPrompt = self.entraSignInPrompt
@@ -108,7 +112,9 @@ final class FreeRDPSessionDriver: RDPSessionDriving {
             password: { password },
             gatewayPassword: { [gatewayPassword] in gatewayPassword },
             verifyCertificate: { certificate in
-                await resolveCertificate(certificate, machineName: machineName, trustStore: trustStore, prompt: certificatePrompt)
+                await resolveCertificate(
+                    certificate, machineName: machineName, trustStore: trustStore,
+                    prompt: certificatePrompt, trustNotSaved: trustNotSaved)
             },
             entraSignIn: { request in await entraSignInPrompt(request, machineName) },
             // Only a desktop that refuses its Entra ID sign-in gets here; the
@@ -196,13 +202,15 @@ private extension RDPAzureDesktopSignIn {
 /// fingerprint the store already trusts connects silently; anything else
 /// prompts, and "Always Trust" records the decision for next time. Returning
 /// `.acceptOnce` to FreeRDP for every accept keeps the store the single source
-/// of trust rather than FreeRDP's own known-hosts file.
+/// of trust rather than FreeRDP's own known-hosts file. If "Always Trust"
+/// cannot be saved, the user is told and this connection still goes ahead.
 @MainActor
 func resolveCertificate(
     _ certificate: RDPCertificate,
     machineName: String,
     trustStore: any TrustStore,
-    prompt: @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision
+    prompt: @MainActor (RDPCertificate, String, Bool) -> RDPTrustDecision,
+    trustNotSaved: @MainActor (RDPCertificate, String, any Error) -> Void
 ) async -> RDPCertificateVerdict {
     let stored = try? await trustStore.trusted(host: certificate.host, port: certificate.port)
     if let stored, stored.matches(fingerprint: certificate.fingerprint) {
@@ -217,14 +225,18 @@ func resolveCertificate(
     case .connectOnce:
         return .acceptOnce
     case .trustAlways:
-        try? await trustStore.trust(TrustedCertificate(
-            host: certificate.host,
-            port: certificate.port,
-            fingerprint: certificate.fingerprint,
-            subject: certificate.subject,
-            issuer: certificate.issuer,
-            commonName: certificate.commonName,
-            trustedAt: Date()))
+        do {
+            try await trustStore.trust(TrustedCertificate(
+                host: certificate.host,
+                port: certificate.port,
+                fingerprint: certificate.fingerprint,
+                subject: certificate.subject,
+                issuer: certificate.issuer,
+                commonName: certificate.commonName,
+                trustedAt: Date()))
+        } catch {
+            trustNotSaved(certificate, machineName, error)
+        }
         return .acceptOnce
     }
 }
@@ -358,5 +370,18 @@ enum RDPCertificatePrompter {
         case .alertSecondButtonReturn: return .trustAlways
         default: return .reject
         }
+    }
+
+    static func reportTrustNotSaved(_ certificate: RDPCertificate, machineName: String, error: any Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Couldn’t save the certificate for \(machineName)"
+        alert.informativeText = """
+            This connection will continue, but you will be asked to verify the certificate again next time.
+
+            \(error.localizedDescription)
+            """
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 }

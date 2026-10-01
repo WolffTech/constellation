@@ -47,8 +47,16 @@ final class GhosttyConfig {
         }
         self.diagnostics = diagnostics
         for message in diagnostics {
-            Log.terminal.warning("ghostty config diagnostic: \(message, privacy: .public)")
+            Log.terminal.warning("ghostty config diagnostic: \(Self.redactingHome(message), privacy: .public)")
         }
+    }
+
+    /// Diagnostics name config file paths, and support bundles copy this log,
+    /// so the home directory (and with it the macOS account name) becomes `~`.
+    /// Settings still show the full message.
+    nonisolated static func redactingHome(_ message: String, home: String = NSHomeDirectory()) -> String {
+        guard !home.isEmpty else { return message }
+        return message.replacingOccurrences(of: home, with: "~")
     }
 
     deinit {
