@@ -9,8 +9,8 @@
 # build.zig.zon declares the minimum Zig it needs.
 set -euo pipefail
 
-ZIG_VERSION="0.16.0"
-ZIG_SHA256="b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489"
+ZIG_VERSION="0.17.0"
+ZIG_SHA256="b607e9b9234790a008116ae5bdb71c6243b84b9fb42a53a9e70fde41c06c536a"
 ZIG_ARCH="aarch64-macos"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
