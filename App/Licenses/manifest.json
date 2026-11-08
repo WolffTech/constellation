@@ -1,7 +1,7 @@
 [
   {
     "name": "Ghostty",
-    "version": "commit de53b335d",
+    "version": "commit 83fb95624",
     "license": "MIT",
     "url": "https://github.com/ghostty-org/ghostty",
     "summary": "libghostty renders the terminal in SSH tabs. The AppKit surface, keyboard and text-input code in ConstellationTerminal is adapted from Ghostty.app.",

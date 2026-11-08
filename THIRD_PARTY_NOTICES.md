@@ -11,7 +11,7 @@ texts are bundled with the app and stored in [`App/Licenses`](App/Licenses).
 libghostty renders the terminal in SSH tabs. The AppKit surface, keyboard and text-input code in ConstellationTerminal is adapted from Ghostty.app.
 
 - Upstream: [https://github.com/ghostty-org/ghostty](https://github.com/ghostty-org/ghostty)
-- Version: commit de53b335d
+- Version: commit 83fb95624
 - License: MIT
 - License text: [`ghostty.txt`](App/Licenses/ghostty.txt)
 
